@@ -23,7 +23,8 @@
       "Bash(./homellm-benchmark:*)",
       "Bash(./homellm-server --help)",
       "Bash(./homellm-server:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(ss:*)"
     ],
     "deny": []
   }

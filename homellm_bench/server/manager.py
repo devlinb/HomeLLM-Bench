@@ -88,9 +88,9 @@ class ServerManager:
             gpu_memory_utilization=gpu_utilization,
             max_num_batched_tokens=STANDARD_CONTEXT_SIZE,
             max_num_seqs=SINGLE_SEQUENCE,
+            quantization=model_config.quantization,
             extra_args={
                 "disable_sliding_window": True,
-                "quantization": model_config.quantization,
                 "dtype": model_config.dtype,
                 "trust_remote_code": True,
                 "enable_prefix_caching": True,
