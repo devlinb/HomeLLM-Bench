@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(huggingface-cli download:*)",
+      "Bash(nvidia-smi:*)",
+      "Bash(fuser:*)",
+      "Bash(curl:*)"
+    ],
+    "deny": []
+  }
+}

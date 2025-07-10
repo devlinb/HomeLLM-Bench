@@ -1,0 +1,81 @@
+from pydantic import BaseModel, Field
+from typing import Dict, Any, Optional
+from datetime import datetime
+
+
+class GenerationMetrics(BaseModel):
+    """Metrics collected during text generation"""
+    
+    # Basic token metrics
+    prompt_tokens: int = Field(..., description="Number of tokens in the prompt")
+    completion_tokens: int = Field(..., description="Number of tokens generated")
+    total_tokens: int = Field(..., description="Total tokens (prompt + completion)")
+    
+    # Timing metrics
+    time_to_first_token: float = Field(..., description="Time to generate first token (seconds)")
+    total_generation_time: float = Field(..., description="Total generation time (seconds)")
+    tokens_per_second: float = Field(..., description="Generation speed (tokens/second)")
+    
+    # System metrics
+    memory_usage_mb: float = Field(..., description="Memory usage in MB")
+    gpu_memory_used_mb: Optional[float] = Field(default=None, description="GPU memory used in MB")
+    gpu_utilization_percent: Optional[float] = Field(default=None, description="GPU utilization percentage")
+    
+    # Engine-specific metrics
+    cache_hit_rate: Optional[float] = Field(default=None, description="Prefix cache hit rate (0.0-1.0)")
+    engine_metrics: Dict[str, Any] = Field(default_factory=dict, description="Engine-specific metrics")
+    
+    # Metadata
+    timestamp: datetime = Field(default_factory=datetime.now, description="When metrics were collected")
+    engine_name: str = Field(..., description="Name of the inference engine")
+    model_name: str = Field(..., description="Name of the model")
+    
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
+
+
+class VLLMMetrics(BaseModel):
+    """vLLM-specific metrics parsed from server responses"""
+    
+    # vLLM performance metrics
+    prefill_time: Optional[float] = Field(default=None, description="Time spent on prefill phase")
+    decode_time: Optional[float] = Field(default=None, description="Time spent on decode phase")
+    queue_time: Optional[float] = Field(default=None, description="Time spent waiting in queue")
+    
+    # vLLM cache metrics
+    num_cached_tokens: Optional[int] = Field(default=None, description="Number of cached tokens used")
+    num_generated_tokens: Optional[int] = Field(default=None, description="Number of tokens generated")
+    
+    # vLLM system metrics
+    running_requests: Optional[int] = Field(default=None, description="Number of running requests")
+    waiting_requests: Optional[int] = Field(default=None, description="Number of waiting requests")
+    gpu_cache_usage: Optional[float] = Field(default=None, description="GPU cache usage percentage")
+    
+    # Raw metrics data
+    raw_metrics: Dict[str, Any] = Field(default_factory=dict, description="Raw metrics from vLLM")
+
+
+class ConversationBenchmarkResult(BaseModel):
+    """Results from benchmarking a single conversation"""
+    
+    conversation_name: str = Field(..., description="Name of the conversation")
+    total_turns: int = Field(..., description="Number of turns in the conversation")
+    total_time: float = Field(..., description="Total time for entire conversation")
+    
+    # Per-turn metrics
+    turn_metrics: list[GenerationMetrics] = Field(..., description="Metrics for each turn")
+    
+    # Aggregate metrics
+    avg_tokens_per_second: float = Field(..., description="Average tokens per second across all turns")
+    total_tokens_generated: int = Field(..., description="Total tokens generated in conversation")
+    cache_effectiveness: Optional[float] = Field(default=None, description="Overall cache effectiveness")
+    
+    # Metadata
+    timestamp: datetime = Field(default_factory=datetime.now)
+    
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
