@@ -1,5 +1,12 @@
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
+from ..config.constants import (
+    DEFAULT_HOST, GPU_MEMORY_UTILIZATION, STANDARD_CONTEXT_SIZE, 
+    SINGLE_SEQUENCE, DEFAULT_MAX_TOKENS
+)
+
+# Default port for vLLM server
+DEFAULT_VLLM_PORT = 8001
 
 
 class VLLMServerConfig(BaseModel):
@@ -10,16 +17,16 @@ class VLLMServerConfig(BaseModel):
     quantization: Optional[str] = Field(default=None, description="Quantization method (e.g., 'gguf')")
     
     # Server configuration
-    host: str = Field(default="127.0.0.1", description="Server host")
-    port: int = Field(default=8000, description="Server port")
+    host: str = Field(default=DEFAULT_HOST, description="Server host")
+    port: int = Field(default=DEFAULT_VLLM_PORT, description="Server port")
     
     # Memory and performance settings
-    gpu_memory_utilization: float = Field(default=0.8, description="GPU memory utilization ratio")
-    max_model_len: Optional[int] = Field(default=None, description="Maximum model sequence length")
+    gpu_memory_utilization: float = Field(default=GPU_MEMORY_UTILIZATION, description="GPU memory utilization ratio")
+    max_model_len: Optional[int] = Field(default=STANDARD_CONTEXT_SIZE, description="Maximum model sequence length")
     
     # Batch size settings (optimized for single user)
-    max_num_batched_tokens: int = Field(default=512, description="Maximum tokens in a batch (single-user optimized)")
-    max_num_seqs: int = Field(default=2, description="Maximum concurrent sequences (single-user optimized)")
+    max_num_batched_tokens: int = Field(default=STANDARD_CONTEXT_SIZE, description="Maximum tokens in a batch")
+    max_num_seqs: int = Field(default=SINGLE_SEQUENCE, description="Maximum concurrent sequences")
     
     # Caching settings
     enable_prefix_caching: bool = Field(default=True, description="Enable prefix caching for better performance")
@@ -85,67 +92,17 @@ class VLLMServerConfig(BaseModel):
         return desc
 
 
-# Predefined configurations for different use cases
+# Standard configuration factory
 class VLLMConfigs:
-    """Predefined vLLM configurations"""
+    """Standard vLLM configuration for home LLM benchmarking"""
     
     @staticmethod
-    def single_user_optimized(model_path: str, port: int = 8001) -> VLLMServerConfig:
-        """Optimized configuration for single-user benchmarking"""
+    def standard_config(model_path: str, port: int = DEFAULT_VLLM_PORT) -> VLLMServerConfig:
+        """Standard configuration for home LLM benchmarking"""
         return VLLMServerConfig(
             model_path=model_path,
             port=port,
-            quantization="gguf",
-            max_model_len=2048,  # Good for long conversations
-            gpu_memory_utilization=0.6,  # Conservative to leave room for system
-            max_num_batched_tokens=512,  # Reduced for single user
-            max_num_seqs=2,  # Allow for conversation context
-            enable_prefix_caching=True,
-            disable_log_stats=True,
-            disable_log_requests=True
+            extra_args={
+                "disable_sliding_window": True  # Better for single user scenarios
+            }
         )
-    
-    @staticmethod
-    def long_context_optimized(model_path: str, port: int = 8001) -> VLLMServerConfig:
-        """Optimized for very long context conversations"""
-        return VLLMServerConfig(
-            model_path=model_path,
-            port=port,
-            quantization="gguf",
-            max_model_len=4096,  # Longer context
-            gpu_memory_utilization=0.7,
-            max_num_batched_tokens=1024,  # Bit larger for long contexts
-            max_num_seqs=1,  # Single conversation at a time
-            enable_prefix_caching=True,
-            disable_log_stats=True,
-            disable_log_requests=True
-        )
-    
-    @staticmethod
-    def debug_mode(model_path: str, port: int = 8001) -> VLLMServerConfig:
-        """Configuration for debugging and development"""
-        return VLLMServerConfig(
-            model_path=model_path,
-            port=port,
-            quantization="gguf",
-            max_model_len=1024,
-            gpu_memory_utilization=0.5,
-            max_num_batched_tokens=256,
-            max_num_seqs=1,
-            enable_prefix_caching=False,  # Disable for consistent timing
-            enforce_eager=True,  # Easier debugging
-            disable_log_stats=False,  # Keep logs for debugging
-            disable_log_requests=False
-        )
-
-
-if __name__ == "__main__":
-    # Example usage
-    config = VLLMConfigs.single_user_optimized("./phi-3.5-mini-Q4_K.gguf")
-    
-    print("Single User Optimized Configuration:")
-    print("=" * 50)
-    print(config.get_description())
-    
-    print("\nCommand Line:")
-    print(" ".join(config.to_command_args()))

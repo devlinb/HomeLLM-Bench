@@ -13,6 +13,13 @@ try:
 except ImportError:
     PYNVML_AVAILABLE = False
 
+# Import GPU memory manager for enhanced GPU info
+try:
+    from utils.gpu_memory import get_gpu_memory_manager
+    GPU_MANAGER_AVAILABLE = True
+except ImportError:
+    GPU_MANAGER_AVAILABLE = False
+
 
 class SystemMetricsCollector:
     """Collects detailed system information and metrics"""
@@ -135,7 +142,7 @@ class SystemMetricsCollector:
                     graphics_clock = None
                     memory_clock = None
                 
-                gpus.append({
+                gpu_info = {
                     'index': i,
                     'name': name,
                     'memory_total_gb': round(memory_info.total / (1024**3), 2),
@@ -148,7 +155,23 @@ class SystemMetricsCollector:
                     'power_usage_watts': power,
                     'graphics_clock_mhz': graphics_clock,
                     'memory_clock_mhz': memory_clock
-                })
+                }
+                
+                # Add enhanced GPU info if available
+                if GPU_MANAGER_AVAILABLE and i == 0:  # Primary GPU
+                    try:
+                        gpu_manager = get_gpu_memory_manager()
+                        if gpu_manager.gpu_info:
+                            gpu_info.update({
+                                'compute_capability': gpu_manager.gpu_info.compute_capability,
+                                'driver_version': gpu_manager.gpu_info.driver_version,
+                                'cuda_version': gpu_manager.gpu_info.cuda_version,
+                                'vllm_version': gpu_manager.get_vllm_version()
+                            })
+                    except Exception:
+                        pass  # Fallback gracefully
+                
+                gpus.append(gpu_info)
                 
             except Exception as e:
                 # If we can't get info for this GPU, skip it

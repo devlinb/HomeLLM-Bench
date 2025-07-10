@@ -1,254 +1,217 @@
-# LLM Benchmark Framework
+# HomeLLM-Bench
 
-Benchmark framework for testing LLM models with focus on single-user local inference.
-
-## Features
-
-- Generic prompts compatible with different chat templates
-- Metrics collection (GPU, CPU, memory, generation performance)
-- Process isolation for clean benchmarking between tests
-- Multiple output formats (CSV, JSON, Markdown)
-- Automatic model downloading
-- Prefix caching effectiveness measurement
-- vLLM optimization for single-user scenarios
-- Context-aware test selection based on model capabilities
-- Separated test data from code
-- Multi-turn conversations with back-and-forth dialogue
-- RAG simulation to test prefix caching strategies
-- Long context tests up to 128K tokens
+A comprehensive benchmark suite for evaluating small quantized LLMs in home environments.
 
 ## Quick Start
 
-### 1. Setup Environment
-
 ```bash
-# Download and setup the recommended model
-python download_models.py --setup
+# Clone the repository
+git clone https://github.com/your-org/HomeLLM-Bench.git
+cd HomeLLM-Bench
+
+# Start vLLM server
+./homellm-server --model microsoft/Phi-3.5-mini-instruct
+
+# Run benchmarks (in another terminal)
+./homellm-benchmark --model microsoft/Phi-3.5-mini-instruct
 ```
-
-### 2. Run Benchmark
-
-```bash
-# Run benchmark with context awareness
-python enhanced_benchmark_runner.py
-
-# List available conversations for your model
-python enhanced_benchmark_runner.py --list-conversations --context-size 128000
-
-# Run specific test types
-python enhanced_benchmark_runner.py --include-tags rag,long --context-size 32000
-
-# Limit number of conversations
-python enhanced_benchmark_runner.py --max-conversations 3
-```
-
-### 3. View Results
-
-Results are saved in the `results/` directory:
-- `*.csv` - Machine-readable metrics
-- `*.json` - Detailed benchmark data
-- `*.md` - Human-readable report
-- `*_system.json` - System information
 
 ## Project Structure
 
 ```
-bench/
-├── schemas/                 # Data models
-│   └── conversation.py     # Conversation schemas with RAG support
-├── templates/              # Chat templates
-│   └── phi3.py            # Phi-3.5 chat template
-├── engines/               # Inference engines
-│   └── vllm_engine.py     # vLLM engine wrapper
-├── metrics/               # Metrics collection
-│   ├── schemas.py         # Metrics data models
-│   ├── vllm_collector.py  # vLLM metrics collector
-│   └── system_collector.py # System metrics collector
-├── config/                # Configuration
-│   └── vllm_config.py     # vLLM server configurations
-├── output/                # Output formatting
-│   └── formatters.py      # Output formatting (CSV/JSON/Markdown)
-├── data/                  # Test data
-│   ├── conversations.json # Conversation templates
-│   ├── rag_data.json     # RAG simulation data
-│   └── conversation_loader.py # Conversation loader
-├── tests/                 # Test suite
-│   ├── test_phi3_template.py
-│   └── test_rag_simulation.py
-├── download_models.py     # Model download automation
-├── run_benchmark.py       # Basic benchmark runner
-├── enhanced_benchmark_runner.py # Main benchmark runner
-└── start_*_vllm.py       # vLLM server starter scripts
+HomeLLM-Bench/
+├── homellm-benchmark      # CLI: Run benchmarks
+├── homellm-server        # CLI: Start vLLM server
+├── homellm_bench/        # Main package
+│   ├── benchmark/        # Benchmark runner
+│   ├── server/          # Server management
+│   ├── config/          # Configuration
+│   ├── utils/           # Utilities
+│   ├── data/            # Test conversations
+│   ├── engines/         # LLM engines
+│   ├── metrics/         # Performance metrics
+│   ├── output/          # Result formatters
+│   ├── schemas/         # Data schemas
+│   └── templates/       # Chat templates
+├── results/             # Benchmark results
+└── tests/              # Test files
 ```
 
-## Test Conversations
+## Features
 
-Available conversation types:
+- **Smart Server Detection** - Automatically detects running vLLM servers
+- **Context-Aware Testing** - Selects appropriate conversations based on model context size
+- **GPU Memory Management** - Dynamic memory allocation with safety margins
+- **RAG Simulation** - Tests prefix caching with context injection/removal
+- **Multi-turn Conversations** - Back-and-forth dialogue simulation
+- **Comprehensive Error Handling** - Actionable error messages with specific solutions
+- **Multiple Output Formats** - CSV, JSON, and Markdown reports
+- **Resource Monitoring** - GPU, CPU, and memory usage tracking
 
-### Context-Aware Selection
-- **Simple Q&A** (~800 tokens) - Basic capabilities
+## CLI Usage
+
+### Server Management
+
+```bash
+# Start vLLM server with auto-detection
+./homellm-server --model microsoft/Phi-3.5-mini-instruct
+
+# Specify GPU memory usage
+./homellm-server --model phi-3.5-mini-4bit --target-memory 6.0
+
+# Use different port
+./homellm-server --model phi-3.5-mini-4bit --port 8002
+
+# Disable torch compilation for debugging
+./homellm-server --model phi-3.5-mini-4bit --disable-torch-compilation
+```
+
+### Benchmark Execution
+
+```bash
+# Basic benchmark run
+./homellm-benchmark --model microsoft/Phi-3.5-mini-instruct
+
+# List available conversations
+./homellm-benchmark --list-conversations --context-size 32000
+
+# Run specific conversation types
+./homellm-benchmark --include-tags rag,technical --context-size 32000
+
+# Exclude certain conversations  
+./homellm-benchmark --exclude-tags long --max-conversations 3
+
+# Use different server port
+./homellm-benchmark --model phi-3.5-mini-4bit --server-port 8002
+```
+
+## Available Conversation Types
+
+The benchmark automatically selects appropriate conversations based on your model's context size:
+
+### By Context Requirements
+- **Simple Q&A** (~800 tokens) - Basic capabilities testing
 - **Code Discussion** (~2.5K tokens) - Technical dialogue and code generation  
 - **Deep Technical** (~7K tokens) - Long-form technical discussions
 - **Ultra Long Context** (~15K tokens) - Maximum context utilization
 
-### RAG Simulation
-- **RAG Context Simulation** - Tests prefix caching with context changes:
-  1. Conversation starts with RAG data
-  2. Multiple turns using the RAG information
-  3. RAG data removed mid-conversation
-  4. Conversation continues without RAG context
-  5. Measures cache hit rates and performance differences
+### By Test Type
+- **RAG Simulation** - Tests prefix caching with context changes
+- **Multi-turn** - Extended conversations with context building
+- **Technical** - Code and technical discussions
+- **Creative** - Creative writing and storytelling
 
-### Multi-Turn Conversations
-- Each user message generates an assistant response
-- Context builds through the conversation
-- RAG data can be injected/removed at specific turns
-- Context usage is monitored
+## Smart Server Detection
 
-## Available Models
+The benchmark runner automatically detects vLLM server status:
 
-List available models for download:
-
-```bash
-python download_models.py --list
-```
-
-Download specific model:
-
-```bash
-python download_models.py --model phi-3.5-mini-4bit
-```
-
-## Manual vLLM Server Management
-
-Start vLLM server:
-
-```bash
-python start_optimized_vllm.py  # optimized settings
-python start_debug_vllm.py      # debug mode, no compilation
-```
+- ✅ **Server Ready** - Proceeds with benchmarks
+- ⏳ **Server Starting** - Waits for server to become ready
+- ❌ **No Server** - Prompts to start server with exact command
+- 🚫 **Port Conflict** - Suggests alternative port
 
 ## Configuration
 
-### vLLM Configuration
-
-Default settings for single-user scenarios:
-
-- `max_num_batched_tokens: 512` - Reduced memory usage
-- `max_num_seqs: 2` - Minimal concurrent sequences
-- `enforce_eager: True` - Avoid compilation cache issues
-- `enable_prefix_caching: True` - Test caching effectiveness
-
 ### System Requirements
-
-- GPU Memory: 8GB+ for 4-bit models
-- System RAM: 8GB+ 
-- Disk Space: 3GB+ for models
-- Python: 3.8+
+- **GPU Memory**: 6GB+ for 4-bit models, 12GB+ for full precision
+- **System RAM**: 8GB+ recommended
+- **Python**: 3.8+
+- **CUDA**: 11.8+ (for GPU acceleration)
 
 ### Dependencies
-
 ```bash
 pip install vllm pydantic requests psutil pynvml
 ```
 
-## Testing
+## Results Output
 
-Run individual components:
+Results are saved in the `results/` directory with timestamps:
+
+- **`*.csv`** - Machine-readable metrics for analysis
+- **`*.json`** - Complete benchmark data with metadata
+- **`*.md`** - Human-readable report with summaries
+- **`*_system.json`** - System configuration and specs
+
+## Error Handling
+
+The framework provides actionable error messages:
 
 ```bash
-# Test chat template
-python -m pytest tests/test_phi3_template.py
+❌ Error: Model 'invalid-model' not found
+💡 Solution: Check model name or add to model registry
 
-# Test vLLM metrics collection (requires running server)
-python test_vllm_metrics.py
+❌ Error: No vLLM server detected on port 8001  
+💡 Solution: Start vLLM server first: ./homellm-server --model your-model
 
-# Test system metrics collection
-python metrics/system_collector.py
-
-# Test output formatting
-python output/formatters.py
+❌ Error: GPU out of memory during inference
+💡 Solution: Reduce context size or use smaller model
 ```
 
-## Output Formats
+## Advanced Usage
 
-### CSV Output
-Machine-readable metrics:
-- Conversation-level aggregates
-- Average performance across turns
-- System resource usage
+### Custom Model Configuration
 
-### Markdown Report
-Human-readable report:
-- System specifications
-- Configuration used
-- Performance summary
-- Per-conversation results
-- Turn-by-turn metrics
+Add new models by extending the model registry in `homellm_bench/config/model_config.py`:
 
-### JSON Output
-Complete benchmark data:
-- System information
-- Individual turn metrics
-- Configuration details
-- Timestamps and metadata
+```python
+@dataclass
+class ModelConfig:
+    model_type: ModelType
+    context_size: int
+    chat_template: str
+    quantization: Optional[str] = None
+    estimated_size_gb: float = 2.0
+```
 
-## Benchmark Methodology
+### Custom Chat Templates
 
-1. **System Info Collection** - Gather system specifications
-2. **Model Loading** - Start vLLM server with optimized settings
-3. **Warmup** - Run warmup generation to stabilize performance
-4. **Conversation Processing** - Process each test conversation:
-   - Convert to model's chat format
-   - Generate responses turn by turn
-   - Collect metrics per turn
-5. **Results Compilation** - Aggregate metrics and save in multiple formats
+Create new templates in `homellm_bench/templates/` following the base template pattern.
 
-## Performance Notes
+### Adding Test Conversations
 
-### GPU Memory Usage
-- Monitor with `nvidia-smi` during benchmarks
-- Adjust `gpu_memory_utilization` if needed
-- Use smaller quantized models for limited VRAM
-
-### Prefix Caching
-- Enabled by default to test caching effectiveness
-- Measures cache hit rates across conversation turns
-
-### Batch Size
-- Optimized for single-user scenarios
-- Reduces memory overhead
-- Maintains long context support
-
-## Extending
-
-### Adding New Models
-1. Add model configuration to `download_models.py`
-2. Create chat template in `templates/`
-3. Update benchmark runner if needed
-
-### Adding New Metrics
-1. Extend schemas in `metrics/schemas.py`
-2. Update collectors to gather new metrics
-3. Modify formatters to include new data
-
-### Custom Conversations
-Add conversations to `data/conversations.json` or create new data files.
+Extend `homellm_bench/data/conversations.json` with new conversation templates.
 
 ## Troubleshooting
 
-### vLLM Server Issues
-- Check port conflicts (default: 8001)
+### Common Issues
+
+**Server won't start:**
+- Check GPU memory with `nvidia-smi`
 - Verify model path exists
-- Monitor GPU memory usage
-- Use debug mode: `start_debug_vllm.py`
+- Try smaller model or reduce target memory
 
-### Memory Issues
-- Reduce `max_model_len` for smaller contexts
-- Lower `gpu_memory_utilization`
-- Use smaller quantized models
+**Benchmark fails:**
+- Ensure vLLM server is running
+- Check network connectivity
+- Verify model compatibility
 
-### Performance Issues
-- Enable `enforce_eager` to avoid compilation overhead
-- Reduce batch sizes further
-- Check system resource usage
+**Out of memory errors:**
+- Reduce context size: `--context-size 8192`
+- Use smaller model variant
+- Lower target memory: `--target-memory 4.0`
+
+## Development
+
+### Package Structure
+
+The project follows Python package conventions with relative imports:
+
+```python
+# Example import structure
+from homellm_bench.benchmark.runner import BenchmarkRunner
+from homellm_bench.server.manager import ServerManager
+```
+
+### Running Tests
+
+```bash
+python -m pytest tests/
+```
+
+### Contributing
+
+1. Follow the existing code structure
+2. Use relative imports within the package
+3. Add comprehensive error handling
+4. Include docstrings for new functions
+5. Test with multiple model types

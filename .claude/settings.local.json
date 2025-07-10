@@ -5,7 +5,25 @@
       "Bash(huggingface-cli download:*)",
       "Bash(nvidia-smi:*)",
       "Bash(fuser:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(pkill:*)",
+      "Bash(true)",
+      "Bash(kill:*)",
+      "Bash(rm:*)",
+      "WebFetch(domain:huggingface.co)",
+      "WebFetch(domain:docs.vllm.ai)",
+      "Bash(timeout:*)",
+      "Bash(ls:*)",
+      "Bash(grep:*)",
+      "Bash(mkdir:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+      "Bash(chmod:*)",
+      "Bash(find:*)",
+      "Bash(./homellm-benchmark:*)",
+      "Bash(./homellm-server --help)",
+      "Bash(./homellm-server:*)",
+      "Bash(git add:*)"
     ],
     "deny": []
   }

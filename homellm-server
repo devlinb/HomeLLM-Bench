@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+"""
+HomeLLM Server Manager
+"""
+
+import sys
+import os
+from pathlib import Path
+
+# Add package to path
+package_dir = Path(__file__).parent / "homellm_bench"
+sys.path.insert(0, str(package_dir.parent))
+
+from homellm_bench.cli.server import main
+
+if __name__ == "__main__":
+    main()

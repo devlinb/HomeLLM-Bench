@@ -29,6 +29,7 @@ class GenerationMetrics(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now, description="When metrics were collected")
     engine_name: str = Field(..., description="Name of the inference engine")
     model_name: str = Field(..., description="Name of the model")
+    turn_metadata: Dict[str, Any] = Field(default_factory=dict, description="Turn-specific metadata")
     
     class Config:
         json_encoders = {
@@ -74,6 +75,7 @@ class ConversationBenchmarkResult(BaseModel):
     
     # Metadata
     timestamp: datetime = Field(default_factory=datetime.now)
+    conversation_metadata: Dict[str, Any] = Field(default_factory=dict, description="Conversation metadata")
     
     class Config:
         json_encoders = {

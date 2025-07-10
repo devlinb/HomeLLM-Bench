@@ -11,14 +11,18 @@ from datetime import datetime
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from schemas.conversation import Conversation, ConversationTemplate, Message, MessageRole, MessageType
+from ..schemas.conversation import Conversation, ConversationTemplate, Message, MessageRole, MessageType
 
 
 class ConversationLoader:
     """Loads and manages conversation data with context awareness"""
     
-    def __init__(self, data_dir: str = "data"):
-        self.data_dir = Path(data_dir)
+    def __init__(self, data_dir: Optional[str] = None):
+        if data_dir is None:
+            # Use package data directory
+            self.data_dir = Path(__file__).parent
+        else:
+            self.data_dir = Path(data_dir)
         self.conversations_file = self.data_dir / "conversations.json"
         self.rag_data_file = self.data_dir / "rag_data.json"
         
@@ -83,7 +87,7 @@ class ConversationLoader:
         for key, template in self.conversation_templates.items():
             # Check if conversation fits in context
             if not template.fits_in_context(model_context_size, generation_buffer):
-                print(f"⚠️ Skipping '{template.name}' - estimated {template.estimated_final_tokens} tokens exceeds context limit")
+                print(f"Warning: Skipping '{template.name}' - estimated {template.estimated_final_tokens} tokens exceeds context limit")
                 continue
             
             # Check tag filtering
@@ -112,7 +116,7 @@ class ConversationLoader:
                 for rag_idx in reversed(rag_message_indices):
                     if rag_idx < len(messages):
                         removed_msg = messages.pop(rag_idx)
-                        print(f"   🗑️ Removing RAG data message (was at position {rag_idx + 1})")
+                        print(f"   Removing RAG data message (was at position {rag_idx + 1})")
                 
                 rag_message_indices.clear()
                 # Mark this message to track the removal
@@ -149,11 +153,11 @@ class ConversationLoader:
     
     def list_available_conversations(self, model_context_size: Optional[int] = None) -> None:
         """List all available conversations with context information"""
-        print("📋 Available Conversation Templates:")
+        print("Available Conversation Templates:")
         print("=" * 80)
         
         for key, template in self.conversation_templates.items():
-            print(f"\\n🔑 Key: {key}")
+            print(f"\\nKey: {key}")
             print(f"   Name: {template.name}")
             print(f"   Description: {template.description}")
             print(f"   Estimated tokens: {template.estimated_final_tokens:,}")
@@ -161,25 +165,27 @@ class ConversationLoader:
             print(f"   Tags: {', '.join(template.tags)}")
             
             if template.rag_config:
-                print(f"   RAG simulation: ✅ (inject at turn {template.rag_config['inject_at_turn']}, remove at turn {template.rag_config.get('remove_at_turn', 'N/A')})")
+                has_initial = template.rag_config.get('has_initial_rag_data', False)
+                remove_turn = template.rag_config.get('remove_rag_at_turn', 'N/A')
+                print(f"   RAG simulation: Yes (initial data: {has_initial}, remove at turn {remove_turn})")
             else:
-                print(f"   RAG simulation: ❌")
+                print(f"   RAG simulation: No")
             
             if model_context_size:
                 fits = template.fits_in_context(model_context_size)
-                status = "✅ Fits" if fits else "❌ Too large"
+                status = "Fits" if fits else "Too large"
                 print(f"   Context fit ({model_context_size:,} tokens): {status}")
     
     def get_conversation_by_key(self, key: str, model_context_size: Optional[int] = None) -> Optional[Conversation]:
         """Get a specific conversation by key"""
         if key not in self.conversation_templates:
-            print(f"❌ Conversation '{key}' not found")
+            print(f"Error: Conversation '{key}' not found")
             return None
         
         template = self.conversation_templates[key]
         
         if model_context_size and not template.fits_in_context(model_context_size):
-            print(f"⚠️ Warning: Conversation '{key}' may exceed context limit")
+            print(f"Warning: Conversation '{key}' may exceed context limit")
         
         return self._generate_conversation_from_template(template)
     
@@ -192,7 +198,7 @@ class ConversationLoader:
         for key, template in self.conversation_templates.items():
             if any(tag in template.tags for tag in tags):
                 if model_context_size and not template.fits_in_context(model_context_size):
-                    print(f"⚠️ Skipping '{template.name}' - exceeds context limit")
+                    print(f"Warning: Skipping '{template.name}' - exceeds context limit")
                     continue
                 
                 conversation = self._generate_conversation_from_template(template)
@@ -231,29 +237,29 @@ if __name__ == "__main__":
     # Test the conversation loader
     loader = ConversationLoader()
     
-    print("🧪 Testing Conversation Loader")
+    print("Testing Conversation Loader")
     print("=" * 50)
     
     # List all conversations
     loader.list_available_conversations(model_context_size=8192)
     
     # Get conversations for specific context size
-    print(f"\\n📏 Conversations that fit in 4K context:")
+    print(f"\\nConversations that fit in 4K context:")
     conversations_4k = loader.get_conversations_for_context(4096)
     for conv in conversations_4k:
-        print(f"   ✅ {conv.name} ({conv.estimate_total_tokens()} estimated tokens)")
+        print(f"   {conv.name} ({conv.estimate_total_tokens()} estimated tokens)")
     
-    print(f"\\n📏 Conversations that fit in 16K context:")
+    print(f"\\nConversations that fit in 16K context:")
     conversations_16k = loader.get_conversations_for_context(16384)
     for conv in conversations_16k:
-        print(f"   ✅ {conv.name} ({conv.estimate_total_tokens()} estimated tokens)")
+        print(f"   {conv.name} ({conv.estimate_total_tokens()} estimated tokens)")
     
     # Test RAG simulation
-    print(f"\\n🎯 Testing RAG simulation:")
+    print(f"\\nTarget: Testing RAG simulation:")
     rag_conv = loader.get_conversation_by_key("rag_simulation")
     if rag_conv:
         print(f"   RAG conversation loaded: {rag_conv.name}")
         rag_messages = [msg for msg in rag_conv.messages if msg.message_type == MessageType.RAG_DATA]
         print(f"   RAG messages found: {len(rag_messages)}")
     
-    print(f"\\n✅ Conversation loader test completed!")
+    print(f"\\nSuccess: Conversation loader test completed!")

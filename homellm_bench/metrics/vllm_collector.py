@@ -19,7 +19,7 @@ from .schemas import GenerationMetrics, VLLMMetrics
 class VLLMMetricsCollector:
     """Collects metrics from vLLM server during inference"""
     
-    def __init__(self, server_host: str = "127.0.0.1", server_port: int = 8000):
+    def __init__(self, server_host: str = "127.0.0.1", server_port: int = 8001):
         self.server_host = server_host
         self.server_port = server_port
         self.base_url = f"http://{server_host}:{server_port}"
@@ -197,6 +197,90 @@ class VLLMMetricsCollector:
             },
             engine_name="vllm",
             model_name=model_name
+        )
+        
+        return generated_text, metrics
+    
+    def generate_chat_with_metrics(self, 
+                                  model_name: str,
+                                  messages: List[Dict[str, str]],
+                                  max_tokens: int = 100,
+                                  temperature: float = 0.7,
+                                  **kwargs) -> GenerationMetrics:
+        """Generate chat completion with metrics collection"""
+        
+        # Pre-generation metrics
+        start_time = time.time()
+        start_system_metrics = self.get_system_metrics()
+        start_server_metrics = self.get_server_metrics()
+        
+        # Prepare chat completion request
+        request_data = {
+            "model": model_name,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": False,
+            **kwargs
+        }
+        
+        # Make generation request
+        try:
+            response = self.session.post(
+                f"{self.base_url}/v1/chat/completions",
+                json=request_data,
+                timeout=60
+            )
+            response.raise_for_status()
+            result = response.json()
+        except Exception as e:
+            raise RuntimeError(f"Generation failed: {e}")
+        
+        # Post-generation metrics
+        end_time = time.time()
+        end_system_metrics = self.get_system_metrics()
+        end_server_metrics = self.get_server_metrics()
+        
+        # Extract response data
+        generated_text = result['choices'][0]['message']['content']
+        usage = result.get('usage', {})
+        
+        # Calculate timing metrics
+        total_time = end_time - start_time
+        prompt_tokens = usage.get('prompt_tokens', 0)
+        completion_tokens = usage.get('completion_tokens', 0)
+        total_tokens = usage.get('total_tokens', prompt_tokens + completion_tokens)
+        
+        # Estimate time to first token (rough approximation)
+        ttft = total_time * 0.1  # Assume 10% of time for first token
+        tokens_per_second = completion_tokens / total_time if total_time > 0 else 0
+        
+        # Calculate cache hit rate if available
+        cache_hit_rate = None
+        if 'prefill_tokens_total' in end_server_metrics and 'prefill_tokens_total' in start_server_metrics:
+            new_prefill = end_server_metrics['prefill_tokens_total'] - start_server_metrics.get('prefill_tokens_total', 0)
+            if prompt_tokens > 0:
+                cache_hit_rate = max(0, 1 - (new_prefill / prompt_tokens))
+        
+        # Build metrics object
+        metrics = GenerationMetrics(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            time_to_first_token=ttft,
+            total_generation_time=total_time,
+            tokens_per_second=tokens_per_second,
+            memory_usage_mb=end_system_metrics.get('memory_usage_mb', 0),
+            gpu_memory_used_mb=end_system_metrics.get('gpu_memory_used_mb'),
+            gpu_utilization_percent=end_system_metrics.get('gpu_utilization_percent'),
+            cache_hit_rate=cache_hit_rate,
+            engine_name="vllm",
+            model_name=model_name,
+            engine_metrics={
+                'start_server_metrics': start_server_metrics,
+                'end_server_metrics': end_server_metrics,
+                'response_metadata': result
+            }
         )
         
         return generated_text, metrics
