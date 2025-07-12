@@ -171,12 +171,7 @@ class VLLMMetricsCollector:
         ttft = total_time * 0.1  # Assume 10% of time for first token
         tokens_per_second = completion_tokens / total_time if total_time > 0 else 0
         
-        # Calculate cache hit rate if available
-        cache_hit_rate = None
-        if 'prefill_tokens_total' in end_server_metrics and 'prefill_tokens_total' in start_server_metrics:
-            new_prefill = end_server_metrics['prefill_tokens_total'] - start_server_metrics.get('prefill_tokens_total', 0)
-            if prompt_tokens > 0:
-                cache_hit_rate = max(0, 1 - (new_prefill / prompt_tokens))
+        # Cache hit rate calculation removed - now using timing delta instead
         
         # Create metrics object
         metrics = GenerationMetrics(
@@ -186,10 +181,6 @@ class VLLMMetricsCollector:
             time_to_first_token=ttft,
             total_generation_time=total_time,
             tokens_per_second=tokens_per_second,
-            memory_usage_mb=end_system_metrics.get('memory_used_mb', 0),
-            gpu_memory_used_mb=end_system_metrics.get('total_gpu_memory_used_mb'),
-            gpu_utilization_percent=end_system_metrics.get('avg_gpu_utilization'),
-            cache_hit_rate=cache_hit_rate,
             engine_metrics={
                 'start_server_metrics': start_server_metrics,
                 'end_server_metrics': end_server_metrics,
@@ -255,12 +246,7 @@ class VLLMMetricsCollector:
         ttft = total_time * 0.1  # Assume 10% of time for first token
         tokens_per_second = completion_tokens / total_time if total_time > 0 else 0
         
-        # Calculate cache hit rate if available
-        cache_hit_rate = None
-        if 'prefill_tokens_total' in end_server_metrics and 'prefill_tokens_total' in start_server_metrics:
-            new_prefill = end_server_metrics['prefill_tokens_total'] - start_server_metrics.get('prefill_tokens_total', 0)
-            if prompt_tokens > 0:
-                cache_hit_rate = max(0, 1 - (new_prefill / prompt_tokens))
+        # Cache hit rate calculation removed - now using timing delta instead
         
         # Build metrics object
         metrics = GenerationMetrics(
@@ -270,10 +256,6 @@ class VLLMMetricsCollector:
             time_to_first_token=ttft,
             total_generation_time=total_time,
             tokens_per_second=tokens_per_second,
-            memory_usage_mb=end_system_metrics.get('memory_usage_mb', 0),
-            gpu_memory_used_mb=end_system_metrics.get('gpu_memory_used_mb'),
-            gpu_utilization_percent=end_system_metrics.get('gpu_utilization_percent'),
-            cache_hit_rate=cache_hit_rate,
             engine_name="vllm",
             model_name=model_name,
             engine_metrics={

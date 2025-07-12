@@ -67,10 +67,7 @@ class BenchmarkFormatter:
                 'avg_prompt_tokens',
                 'avg_completion_tokens', 
                 'avg_generation_time',
-                'avg_time_to_first_token',
-                'avg_memory_usage_mb',
-                'avg_gpu_memory_mb',
-                'avg_gpu_utilization'
+                'avg_time_to_first_token'
             ]
             
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -84,12 +81,8 @@ class BenchmarkFormatter:
                     avg_completion_tokens = sum(m.completion_tokens for m in turn_metrics) / len(turn_metrics)
                     avg_generation_time = sum(m.total_generation_time for m in turn_metrics) / len(turn_metrics)
                     avg_ttft = sum(m.time_to_first_token for m in turn_metrics) / len(turn_metrics)
-                    avg_memory = sum(m.memory_usage_mb for m in turn_metrics) / len(turn_metrics)
-                    avg_gpu_memory = sum(m.gpu_memory_used_mb or 0 for m in turn_metrics) / len(turn_metrics)
-                    avg_gpu_util = sum(m.gpu_utilization_percent or 0 for m in turn_metrics) / len(turn_metrics)
                 else:
-                    avg_prompt_tokens = avg_completion_tokens = avg_generation_time = 0
-                    avg_ttft = avg_memory = avg_gpu_memory = avg_gpu_util = 0
+                    avg_prompt_tokens = avg_completion_tokens = avg_generation_time = avg_ttft = 0
                 
                 writer.writerow({
                     'conversation_name': result.conversation_name,
@@ -102,10 +95,7 @@ class BenchmarkFormatter:
                     'avg_prompt_tokens': round(avg_prompt_tokens, 1),
                     'avg_completion_tokens': round(avg_completion_tokens, 1),
                     'avg_generation_time': round(avg_generation_time, 3),
-                    'avg_time_to_first_token': round(avg_ttft, 3),
-                    'avg_memory_usage_mb': round(avg_memory, 1),
-                    'avg_gpu_memory_mb': round(avg_gpu_memory, 1),
-                    'avg_gpu_utilization': round(avg_gpu_util, 1)
+                    'avg_time_to_first_token': round(avg_ttft, 3)
                 })
     
     def _save_json(self, results: List["ConversationBenchmarkResult"], 
@@ -223,9 +213,6 @@ if __name__ == "__main__":
             time_to_first_token=0.05,
             total_generation_time=0.4,
             tokens_per_second=50.0,
-            memory_usage_mb=1000.0,
-            gpu_memory_used_mb=5000.0,
-            gpu_utilization_percent=75.0,
             engine_name="vllm",
             model_name="test-model"
         )

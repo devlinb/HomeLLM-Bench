@@ -16,13 +16,8 @@ class GenerationMetrics(BaseModel):
     total_generation_time: float = Field(..., description="Total generation time (seconds)")
     tokens_per_second: float = Field(..., description="Generation speed (tokens/second)")
     
-    # System metrics
-    memory_usage_mb: float = Field(..., description="Memory usage in MB")
-    gpu_memory_used_mb: Optional[float] = Field(default=None, description="GPU memory used in MB")
-    gpu_utilization_percent: Optional[float] = Field(default=None, description="GPU utilization percentage")
     
     # Engine-specific metrics
-    cache_hit_rate: Optional[float] = Field(default=None, description="Prefix cache hit rate (0.0-1.0)")
     engine_metrics: Dict[str, Any] = Field(default_factory=dict, description="Engine-specific metrics")
     
     # Metadata

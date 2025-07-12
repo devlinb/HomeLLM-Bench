@@ -183,8 +183,6 @@ class BenchmarkRunner:
                 
                 print(f"   Generated {metrics.completion_tokens} tokens in {metrics.total_generation_time:.3f}s")
                 print(f"   Speed: {metrics.tokens_per_second:.1f} tok/s")
-                if metrics.cache_hit_rate is not None:
-                    print(f"   Cache hit rate: {metrics.cache_hit_rate:.2%}")
                 
                 # Brief preview of generated content
                 preview = generated_text.strip()[:100] + "..." if len(generated_text.strip()) > 100 else generated_text.strip()
@@ -214,9 +212,13 @@ class BenchmarkRunner:
             if turn_metrics else 0
         )
         
-        # Calculate cache effectiveness (if available)
-        cache_hit_rates = [m.cache_hit_rate for m in turn_metrics if m.cache_hit_rate is not None]
-        cache_effectiveness = sum(cache_hit_rates) / len(cache_hit_rates) if cache_hit_rates else None
+        # Calculate cache effectiveness as timing delta between first and second message
+        cache_effectiveness = None
+        if len(turn_metrics) >= 2:
+            first_ttft = turn_metrics[0].time_to_first_token
+            second_ttft = turn_metrics[1].time_to_first_token
+            if first_ttft is not None and second_ttft is not None and first_ttft > 0:
+                cache_effectiveness = first_ttft - second_ttft
         
         # Create enhanced result with RAG simulation metadata
         result = ConversationBenchmarkResult(
