@@ -14,6 +14,8 @@ from ..schemas.conversation import Conversation, Message, MessageRole, MessageTy
 from ..utils.benchmark_dependencies import BenchmarkDependencies
 from ..utils.exceptions import safe_execute, handle_server_connection_error, handle_model_config_error
 from ..utils.server_detection import detect_vllm_server, wait_for_server_ready, get_vllm_process_info
+from ..utils.compilation_cache import get_compilation_cache
+from ..utils.vllm_server_manager import VLLMServerManager
 from ..config.vllm_config import DEFAULT_VLLM_PORT
 from ..config.constants import (
     CONTEXT_WARNING_THRESHOLD, DEFAULT_MAX_TOKENS, DEFAULT_TEMPERATURE,
@@ -46,6 +48,9 @@ class BenchmarkRunner:
         
         # Set context size from config or parameter
         self.model_context_size = model_context_size or self.model_config.context_size
+        
+        # Initialize compilation cache (uses default ~/.cache/vllm/torch_compile_cache)
+        self.compilation_cache = get_compilation_cache()
         
         # Get appropriate template for model
         self.template = self.deps.get_template(self.model_config.chat_template)
@@ -167,17 +172,14 @@ class BenchmarkRunner:
                 metrics.prompt_tokens = estimated_prompt_tokens  # Update with our estimate
                 
                 # Add turn metadata to metrics
-                if hasattr(metrics, 'turn_metadata'):
-                    metrics.turn_metadata = {}
-                else:
-                    metrics.turn_metadata = {}
+                metrics.turn_metadata = {}
                 
-                metrics.turn_metadata.update({
+                metrics.turn_metadata = {
                     "turn_number": turn_number,
                     "message_type": user_message.message_type.value,
                     "rag_active": rag_data_active,
                     "context_usage_percent": (estimated_prompt_tokens / self.model_context_size) * 100
-                })
+                }
                 
                 turn_metrics.append(metrics)
                 
@@ -198,7 +200,6 @@ class BenchmarkRunner:
                     time_to_first_token=0,
                     total_generation_time=0,
                     tokens_per_second=0,
-                    memory_usage_mb=0,
                     engine_name="vllm",
                     model_name=os.path.basename(self.model_name)
                 ))
@@ -220,7 +221,6 @@ class BenchmarkRunner:
             if first_ttft is not None and second_ttft is not None and first_ttft > 0:
                 cache_effectiveness = first_ttft - second_ttft
         
-        # Create enhanced result with RAG simulation metadata
         result = ConversationBenchmarkResult(
             conversation_name=conversation.name,
             total_turns=len(turn_metrics),
@@ -233,19 +233,14 @@ class BenchmarkRunner:
         )
         
         # Add enhanced metadata
-        if hasattr(result, 'conversation_metadata'):
-            result.conversation_metadata = {}
-        else:
-            result.conversation_metadata = {}
-        
-        result.conversation_metadata.update({
+        result.conversation_metadata = {
             "description": conversation.description,
             "tags": conversation.tags,
             "estimated_final_tokens": conversation.estimated_final_tokens,
             "actual_final_context": sum(len(msg["content"]) for msg in conversation_history) // 4,
             "rag_simulation": any(msg.message_type == MessageType.RAG_DATA for msg in conversation.messages),
             "max_context_usage": max((m.turn_metadata.get("context_usage_percent", 0) for m in turn_metrics), default=0)
-        })
+        }
         
         print(f"\\nSummary:")
         print(f"   Total turns: {len(turn_metrics)}")
@@ -253,9 +248,84 @@ class BenchmarkRunner:
         print(f"   Tokens generated: {total_tokens_generated}")
         print(f"   Speed: {avg_tokens_per_second:.1f} tok/s")
         if cache_effectiveness:
-            print(f"   Cache effectiveness: {cache_effectiveness:.2%}")
+            print(f"   Cache effectiveness: {cache_effectiveness:.3f}s")
         
         return result
+    
+    def _get_server_config_dict(self) -> Dict[str, Any]:
+        """Get server configuration dictionary for cache hash generation."""
+        return {
+            'gpu_memory_utilization': 0.6,  # Common default
+            'max_model_len': 32768,  # Common default
+            'quantization': 'gptq_marlin' if 'gptq' in self.model_name.lower() else None,
+            'enable_prefix_caching': True,
+            'dtype': 'auto',
+            'tensor_parallel_size': 1,
+            'enforce_eager': False,
+        }
+    
+    def check_compilation_status(self) -> Dict[str, Any]:
+        """Check detailed compilation status for the current model."""
+        config_dict = self._get_server_config_dict()
+        return self.compilation_cache.get_cache_info(self.model_name, config_dict)
+    
+    def is_compiled(self) -> bool:
+        """Check if current model configuration is compiled."""
+        config_dict = self._get_server_config_dict()
+        return self.compilation_cache.is_compiled(self.model_name, config_dict)
+    
+    def start_vllm_server(self, auto_start: bool = False) -> bool:
+        """Start vLLM server with proper monitoring and error handling.
+        
+        Args:
+            auto_start: If True, start server automatically. If False, ask user.
+            
+        Returns:
+            True if server is ready, False otherwise
+        """
+        # Check if server is already running
+        status, pid, message = detect_vllm_server(self.port, self.host)
+        if status == "ready":
+            print(f"Server already running on {self.host}:{self.port}")
+            return True
+        
+        if not auto_start:
+            print(f"Start vLLM server? (y/n)")
+            response = input().strip().lower()
+            if response not in ['y', 'yes']:
+                return False
+        
+        # Start server using the new manager
+        print(f"Starting vLLM server for {self.model_name}...")
+        print(f"Server will be available at http://{self.host}:{self.port}")
+        
+        config_dict = self._get_server_config_dict()
+        
+        try:
+            manager = VLLMServerManager(self.host, self.port)
+            result = manager.start_server(
+                model_path=self.model_name,
+                gpu_memory_utilization=config_dict.get('gpu_memory_utilization', 0.6),
+                max_model_len=config_dict.get('max_model_len', 32768),
+                enable_prefix_caching=config_dict.get('enable_prefix_caching', True),
+                enforce_eager=config_dict.get('enforce_eager', False),
+                disable_log_stats=True,
+                disable_log_requests=True,
+            )
+            
+            if result.success:
+                print(f"Server started successfully in {result.startup_time:.1f}s")
+                server_info = manager.get_server_info()
+                print(f"Model: {server_info.get('model', 'Unknown')}")
+                print(f"Process ID: {server_info.get('process_id')}")
+                return True
+            else:
+                print(f"Failed to start server: {result.error_message}")
+                return False
+                
+        except Exception as e:
+            print(f"Error starting server: {e}")
+            return False
     
     def run_complete_benchmark(self, 
                              include_tags: Optional[List[str]] = None,
@@ -284,42 +354,40 @@ class BenchmarkRunner:
             print("Failed: No suitable conversations found for this context size")
             return {}
         
+        # Check compilation status
+        print("\\nChecking compilation status...")
+        config_dict = self._get_server_config_dict()
+        if self.compilation_cache.is_compiled(self.model_name, config_dict):
+            print(f"Found compiled cache for {self.model_name}")
+        else:
+            print(f"No compiled cache found for {self.model_name}")
+            print("Note: First run will include compilation time")
+        
         # Check vLLM server is running
         print("\\nChecking vLLM server...")
         status, pid, message = detect_vllm_server(self.port, self.host)
         
         if status == "not_running":
-            print(f"❌ {message}")
-            print(f"💡 Start vLLM server? (y/n)")
-            print(f"   Command: python start_vllm.py --model {self.model_name} --port {self.port}")
-            
-            response = input().strip().lower()
-            if response in ['y', 'yes']:
-                print("🚀 Please start the server in another terminal and press Enter to continue...")
-                input()
-                # Re-check after user starts server
-                status, pid, message = detect_vllm_server(self.port, self.host)
-                if status == "starting_up":
-                    if not wait_for_server_ready(self.port, self.host, max_wait=60):
-                        handle_server_connection_error(self.host, self.port)
-                elif status != "ready":
-                    handle_server_connection_error(self.host, self.port)
-            else:
-                handle_server_connection_error(self.host, self.port)
+            print(f"No server running on {self.host}:{self.port}")
+            auto_start = getattr(self, 'auto_start_server', False)
+            if not self.start_vllm_server(auto_start=auto_start):
+                print("Failed: Cannot run benchmark without vLLM server")
+                return {}
         
         elif status == "starting_up":
-            print(f"⏳ {message}")
-            print(f"💡 Waiting for server to become ready...")
-            if not wait_for_server_ready(self.port, self.host, max_wait=60):
-                handle_server_connection_error(self.host, self.port)
+            print(f"STARTING: {message}")
+            print(f"Waiting for server to become ready...")
+            if not wait_for_server_ready(self.port, self.host, max_wait=120):
+                print("Failed: Server did not become ready within 2 minutes")
+                return {}
         
         elif status == "port_busy":
-            print(f"❌ {message}")
-            print(f"💡 Stop the other service or use a different port with --server-port")
-            handle_server_connection_error(self.host, self.port)
+            print(f"ERROR: {message}")
+            print(f"Stop the other service or use a different port with --server-port")
+            return {}
         
         elif status == "ready":
-            print(f"✅ {message}")
+            print(f"READY: {message}")
             # Show server info
             if pid:
                 info = get_vllm_process_info(pid)
@@ -417,6 +485,12 @@ def main():
                        choices=["cuda", "rocm", "xpu"],
                        default="cuda",
                        help="GPU runtime to use (only cuda supported currently)")
+    parser.add_argument("--check-compilation", action="store_true", 
+                       help="Check compilation status and exit")
+    parser.add_argument("--compilation-info", action="store_true", 
+                       help="Show detailed compilation cache information")
+    parser.add_argument("--auto-start-server", action="store_true",
+                       help="Automatically start vLLM server if not running")
     
     args = parser.parse_args()
     
@@ -425,6 +499,30 @@ def main():
         deps = BenchmarkDependencies()
         deps.conversation_loader.list_available_conversations(args.context_size)
         return
+    
+    # Check compilation status if requested
+    if args.check_compilation or args.compilation_info:
+        runner = BenchmarkRunner(args.model, args.context_size, port=args.server_port)
+        
+        if args.check_compilation:
+            if runner.is_compiled():
+                print(f"Model {args.model} is compiled")
+            else:
+                print(f"Model {args.model} is not compiled")
+            return
+        
+        if args.compilation_info:
+            info = runner.check_compilation_status()
+            print(f"Compilation Info for {args.model}:")
+            print(f"  Cache Hash: {info['cache_hash']}")
+            print(f"  Cache Path: {info['cache_path']}")
+            print(f"  Cache Exists: {info['exists']}")
+            print(f"  Is Compiled: {info['is_compiled']}")
+            if info['files']:
+                print(f"  Cache Files:")
+                for file_info in info['files']:
+                    print(f"    {file_info['name']}: {file_info['size_mb']:.1f}MB")
+            return
     
     # Initialize system info
     from ..utils.system_info import initialize_system, GPURuntime
@@ -450,6 +548,9 @@ def main():
         model_context_size=args.context_size,
         port=args.server_port
     )
+    
+    # Set auto-start server flag
+    runner.auto_start_server = args.auto_start_server
     
     files_created = safe_execute(
         runner.run_complete_benchmark,

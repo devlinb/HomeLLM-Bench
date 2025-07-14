@@ -1,5 +1,6 @@
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
+import os
 from ..config.constants import (
     DEFAULT_HOST, GPU_MEMORY_UTILIZATION, STANDARD_CONTEXT_SIZE, 
     SINGLE_SEQUENCE, DEFAULT_MAX_TOKENS
@@ -60,6 +61,7 @@ class VLLMServerConfig(BaseModel):
         
         if self.enable_prefix_caching:
             args.append("--enable-prefix-caching")
+        
         
         if self.enforce_eager:
             args.append("--enforce-eager")

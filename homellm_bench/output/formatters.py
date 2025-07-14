@@ -167,11 +167,11 @@ class BenchmarkFormatter:
             
             # Detailed Results
             f.write("## Detailed Results\n\n")
-            f.write("| Conversation | Turns | Tokens | Speed (tok/s) | Time (s) | Cache Hit |\n")
-            f.write("|-------------|-------|--------|---------------|----------|----------|\n")
+            f.write("| Conversation | Turns | Tokens | Speed (tok/s) | Time (s) | Cache Effectiveness |\n")
+            f.write("|-------------|-------|--------|---------------|----------|--------------------|\n")
             
             for result in results:
-                cache_str = f"{result.cache_effectiveness:.1%}" if result.cache_effectiveness else "N/A"
+                cache_str = f"{result.cache_effectiveness:.3f}s" if result.cache_effectiveness else "N/A"
                 f.write(f"| {result.conversation_name} | {result.total_turns} | "
                        f"{result.total_tokens_generated} | {result.avg_tokens_per_second:.1f} | "
                        f"{result.total_time:.2f} | {cache_str} |\n")
