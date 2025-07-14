@@ -78,7 +78,7 @@ class ModelRegistry:
             chat_template="qwen",
             context_size=32768,
             estimated_size_gb=2.0,  # GPTQ Int4 quantized
-            quantization=None,  # Let vLLM auto-detect best quantization (gptq_marlin on NVIDIA)
+            quantization="qptq",  # Let vLLM auto-detect best quantization (gptq_marlin on NVIDIA)
             dtype="auto"
         ))
         

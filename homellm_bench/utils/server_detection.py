@@ -20,8 +20,20 @@ def check_vllm_process(port: int) -> Tuple[bool, Optional[int]]:
             try:
                 cmdline = ' '.join(proc.info['cmdline'] or [])
                 
-                # Look for vLLM API server process
-                if 'vllm.entrypoints.openai.api_server' in cmdline:
+                # Look for vLLM processes in various formats:
+                # 1. vllm serve (new CLI format)
+                # 2. vllm.entrypoints.openai.api_server (old format)
+                # 3. Any vllm process with serve command
+                vllm_indicators = [
+                    'vllm serve',
+                    'vllm.entrypoints.openai.api_server',
+                    '/vllm serve',
+                    'bin/vllm serve'
+                ]
+                
+                is_vllm_process = any(indicator in cmdline for indicator in vllm_indicators)
+                
+                if is_vllm_process:
                     # Check if it's using our port
                     if f'--port {port}' in cmdline or f'--port={port}' in cmdline:
                         return True, proc.info['pid']
@@ -105,13 +117,28 @@ def get_vllm_process_info(pid: int) -> Optional[dict]:
         proc = psutil.Process(pid)
         cmdline = ' '.join(proc.cmdline())
         
-        # Extract model name from command line
+        # Extract model name from command line - handle both formats
         model_name = "unknown"
+        
+        # Method 1: Look for --model parameter
         if "--model" in cmdline:
             parts = cmdline.split("--model")
             if len(parts) > 1:
                 model_part = parts[1].strip().split()[0]
                 model_name = model_part
+        
+        # Method 2: For 'vllm serve <model>' format, model is the first positional arg after 'serve'
+        elif "vllm serve" in cmdline:
+            # Find the part after 'serve'
+            serve_parts = cmdline.split("vllm serve")
+            if len(serve_parts) > 1:
+                args_after_serve = serve_parts[1].strip().split()
+                if args_after_serve:
+                    # First argument after 'serve' should be the model
+                    potential_model = args_after_serve[0]
+                    # Make sure it's not a flag
+                    if not potential_model.startswith('-'):
+                        model_name = potential_model
         
         return {
             "pid": pid,
