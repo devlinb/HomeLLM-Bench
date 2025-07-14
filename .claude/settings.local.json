@@ -24,7 +24,10 @@
       "Bash(./homellm-server --help)",
       "Bash(./homellm-server:*)",
       "Bash(git add:*)",
-      "Bash(ss:*)"
+      "Bash(ss:*)",
+      "Bash(pip install:*)",
+      "WebFetch(domain:docs.flashinfer.ai)",
+      "Bash(nvcc:*)"
     ],
     "deny": []
   }

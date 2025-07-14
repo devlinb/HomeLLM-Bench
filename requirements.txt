@@ -1,0 +1,5 @@
+vllm>=0.92
+pydantic
+requests
+psutil
+pynvml
