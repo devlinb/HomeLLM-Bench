@@ -7,8 +7,6 @@ from ..metrics.system_collector import SystemMetricsCollector
 from ..engines.vllm_engine import VLLMEngine
 from ..output.formatters import BenchmarkFormatter
 from ..data.conversation_loader import ConversationLoader
-from ..config.model_config import model_registry
-from ..templates.factory import get_template
 
 
 class BenchmarkDependencies:
@@ -41,15 +39,4 @@ class BenchmarkDependencies:
             self._conversation_loader = ConversationLoader()
         return self._conversation_loader
     
-    @property
-    def model_registry(self):
-        """Get model registry"""
-        return model_registry
     
-    def create_engine(self, model_name: str, host: str, port: int) -> VLLMEngine:
-        """Create vLLM engine"""
-        return VLLMEngine(model_name=model_name, host=host, port=port)
-    
-    def get_template(self, template_name: str):
-        """Get chat template"""
-        return get_template(template_name)

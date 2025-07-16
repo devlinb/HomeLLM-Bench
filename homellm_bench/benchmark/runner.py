@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Enhanced benchmark runner with context-aware conversation selection and RAG simulation
+HomeLLM Benchmark Runner - Connect to any OpenAI-compatible chat completions endpoint
 """
 import time
 import sys
@@ -12,60 +12,57 @@ from pathlib import Path
 from ..metrics.schemas import GenerationMetrics, ConversationBenchmarkResult
 from ..schemas.conversation import Conversation, Message, MessageRole, MessageType
 from ..utils.benchmark_dependencies import BenchmarkDependencies
-from ..utils.exceptions import safe_execute, handle_server_connection_error, handle_model_config_error
-from ..utils.server_detection import detect_vllm_server, wait_for_server_ready, get_vllm_process_info
-from ..utils.compilation_cache import get_compilation_cache
-from ..utils.vllm_server_manager import VLLMServerManager
-from ..config.vllm_config import DEFAULT_VLLM_PORT
-from ..config.constants import (
-    CONTEXT_WARNING_THRESHOLD, DEFAULT_MAX_TOKENS, DEFAULT_TEMPERATURE,
-    TOKEN_ESTIMATION_DIVISOR
-)
+from ..utils.exceptions import safe_execute
+from ..config.constants import DEFAULT_MAX_TOKENS, DEFAULT_TEMPERATURE, TOKEN_ESTIMATION_DIVISOR, DEFAULT_PORT, DEFAULT_CONTEXT_SIZE
 
 
 class BenchmarkRunner:
-    """Enhanced benchmark runner with dynamic conversation generation and RAG simulation"""
+    """Benchmark runner that connects to any OpenAI-compatible chat completions endpoint"""
     
     def __init__(self, 
-                 model_name: str,
-                 model_context_size: Optional[int] = None,
                  host: str = "127.0.0.1",
-                 port: int = DEFAULT_VLLM_PORT,
-                 output_dir: str = "results",
-                 deps: Optional[BenchmarkDependencies] = None):
+                 port: int = DEFAULT_PORT,
+                 context_size: int = DEFAULT_CONTEXT_SIZE,
+                 engine_type: str = "vllm",
+                 model_name: str = "Qwen/Qwen2.5-3B-Instruct-GPTQ-Int4",
+                 output_dir: str = "results"):
         
-        self.model_name = model_name
         self.host = host
         self.port = port
+        self.context_size = context_size
+        self.engine_type = engine_type.lower()
+        self.model_name = model_name
         
         # Initialize dependencies
-        self.deps = deps or BenchmarkDependencies(output_dir)
+        self.deps = BenchmarkDependencies(output_dir)
         
-        # Get model configuration
-        self.model_config = self.deps.model_registry.get_model_config(model_name)
-        if not self.model_config:
-            handle_model_config_error(model_name)
+        # Initialize engine client based on type
+        if self.engine_type == "vllm":
+            from ..engines.vllm_engine import VLLMEngine
+            self.engine = VLLMEngine(model_name=model_name, host=host, port=port)
+        elif self.engine_type == "ollama":
+            # Future: OllamaEngine would go here
+            raise NotImplementedError("Ollama support not yet implemented")
+        else:
+            raise ValueError(f"Unsupported engine type: {engine_type}")
         
-        # Set context size from config or parameter
-        self.model_context_size = model_context_size or self.model_config.context_size
-        
-        # Initialize compilation cache (uses default ~/.cache/vllm/torch_compile_cache)
-        self.compilation_cache = get_compilation_cache()
-        
-        # Get appropriate template for model
-        self.template = self.deps.get_template(self.model_config.chat_template)
-        if not self.template:
-            print(f"Warning: Template '{self.model_config.chat_template}' not found, falling back to phi3")
-            self.template = self.deps.get_template("phi3")
-        
-        # Initialize engine client (connects to external server)
-        self.engine = self.deps.create_engine(model_name=model_name, host=host, port=port)
-        
-        print(f"Model: {model_name}")
-        print(f"Model type: {self.model_config.model_type.value}")
-        print(f"Chat template: {self.model_config.chat_template}")
-        print(f"Context size: {self.model_context_size:,} tokens")
-        print(f"Connecting to vLLM server at {host}:{port}")
+        print(f"Benchmark runner initialized:")
+        print(f"  Endpoint: {host}:{port}")
+        print(f"  Engine: {engine_type}")
+        print(f"  Model: {model_name}")
+        print(f"  Context: {context_size:,} tokens")
+    
+    def estimate_conversation_tokens(self, messages: List[Dict[str, str]]) -> int:
+        """Character-based token estimation for OpenAI format messages"""
+        total_chars = sum(len(msg['content']) for msg in messages)
+        return total_chars // TOKEN_ESTIMATION_DIVISOR
+    
+    def check_server_health(self) -> bool:
+        """Check if the server is responding"""
+        try:
+            return self.engine.is_running()
+        except Exception:
+            return False
     
     def select_conversations(self, 
                            include_tags: Optional[List[str]] = None,
@@ -74,29 +71,28 @@ class BenchmarkRunner:
         """Select appropriate conversations based on context size and filters"""
         
         conversations = self.deps.conversation_loader.get_test_suite(
-            model_context_size=self.model_context_size,
+            model_context_size=self.context_size,
             include_tags=include_tags,
             exclude_tags=exclude_tags
         )
         
         if max_conversations and len(conversations) > max_conversations:
-            # Prioritize conversations by complexity/importance
             conversations = conversations[:max_conversations]
         
-        print(f"Selected {len(conversations)} conversations for benchmarking:")
+        print(f"Selected {len(conversations)} conversations:")
         for conv in conversations:
             estimated_tokens = conv.estimate_total_tokens()
             tags_str = ", ".join(conv.tags)
             rag_indicator = "[RAG]" if any(msg.message_type == MessageType.RAG_DATA for msg in conv.messages) else ""
-            print(f"   - {conv.name} ({estimated_tokens:,} tokens) [{tags_str}] {rag_indicator}")
+            print(f"  - {conv.name} (~{estimated_tokens:,} tokens) [{tags_str}] {rag_indicator}")
         
         return conversations
     
     def run_conversation_benchmark(self, conversation: Conversation) -> ConversationBenchmarkResult:
-        """Run benchmark for a single conversation with enhanced turn handling"""
-        print(f"\\nBenchmarking: {conversation.name}")
+        """Run benchmark for a single conversation"""
+        print(f"\\nRunning: {conversation.name}")
         print(f"Description: {conversation.description}")
-        print("-" * 70)
+        print("-" * 60)
         
         turn_metrics = []
         total_start_time = time.time()
@@ -114,112 +110,91 @@ class BenchmarkRunner:
                 })
                 if msg.message_type == MessageType.RAG_DATA:
                     rag_data_active = True
-                    print("   Initial RAG data loaded into conversation context")
+                    print("  RAG data loaded")
         
-        # Process messages and generate responses dynamically
+        # Process user messages and generate responses
         user_messages = [msg for msg in conversation.messages if msg.role == MessageRole.USER]
         
         for turn_idx, user_message in enumerate(user_messages):
             turn_number = turn_idx + 1
             print(f"\\nTurn {turn_number}/{len(user_messages)}")
             
-            # Handle RAG data removal before processing this message
+            # Handle RAG data removal
             if (user_message.message_type == MessageType.RAG_REMOVAL and 
                 user_message.message_metadata.get("remove_rag_before_this") and 
                 rag_data_active):
                 
-                # Remove RAG data from history
                 conversation_history = [
                     msg for msg in conversation_history 
                     if not msg["content"].startswith("[RETRIEVED INFORMATION]")
                 ]
                 rag_data_active = False
-                print("   Removed: RAG data removed from conversation context")
+                print("  RAG data removed")
             
-            # Add current user message to history
+            # Add current user message
             conversation_history.append({
                 "role": user_message.role.value,
                 "content": user_message.content
             })
             
-            # Format the conversation for the model
-            prompt = self.template.format_messages(conversation_history)
-            
             # Estimate context usage
-            estimated_prompt_tokens = len(prompt) // 4  # Rough estimate
-            print(f"   Estimated prompt tokens: {estimated_prompt_tokens:,}")
+            estimated_tokens = self.estimate_conversation_tokens(conversation_history)
+            print(f"  Context: ~{estimated_tokens:,} tokens")
             
             # Check context limit
-            if estimated_prompt_tokens > self.model_context_size * 0.8:  # 80% threshold
-                print(f"   Warning: Approaching context limit ({estimated_prompt_tokens:,}/{self.model_context_size:,})")
+            if estimated_tokens > self.context_size * 0.8:
+                print(f"  Warning: Approaching context limit ({estimated_tokens:,}/{self.context_size:,})")
             
             try:
-                # Generate response with metrics
-                print(f"   Generating response...")
+                # Generate response
+                print(f"  Generating...")
                 generated_text, metrics = self.engine.generate_chat_with_metrics(
                     messages=conversation_history,
-                    max_tokens=min(DEFAULT_MAX_TOKENS, self.model_context_size - estimated_prompt_tokens - 100),  # Adaptive max tokens
+                    max_tokens=min(DEFAULT_MAX_TOKENS, self.context_size - estimated_tokens - 100),
                     temperature=DEFAULT_TEMPERATURE
                 )
                 
-                # Add assistant response to history
+                # Add response to history
                 conversation_history.append({
                     "role": "assistant",
                     "content": generated_text.strip()
                 })
                 
-                # Enhance metrics with turn-specific information
-                metrics.prompt_tokens = estimated_prompt_tokens  # Update with our estimate
-                
-                # Add turn metadata to metrics
-                metrics.turn_metadata = {}
-                
+                # Add turn metadata
                 metrics.turn_metadata = {
                     "turn_number": turn_number,
                     "message_type": user_message.message_type.value,
                     "rag_active": rag_data_active,
-                    "context_usage_percent": (estimated_prompt_tokens / self.model_context_size) * 100
+                    "context_usage_percent": (estimated_tokens / self.context_size) * 100
                 }
                 
                 turn_metrics.append(metrics)
                 
-                print(f"   Generated {metrics.completion_tokens} tokens in {metrics.total_generation_time:.3f}s")
-                print(f"   Speed: {metrics.tokens_per_second:.1f} tok/s")
-                
-                # Brief preview of generated content
-                preview = generated_text.strip()[:100] + "..." if len(generated_text.strip()) > 100 else generated_text.strip()
-                print(f"   Preview: {preview}")
+                print(f"  Generated {metrics.completion_tokens} tokens in {metrics.total_generation_time:.2f}s")
+                print(f"  Speed: {metrics.tokens_per_second:.1f} tok/s")
                 
             except Exception as e:
-                print(f"   Failed: Generation failed: {e}")
+                print(f"  Error: {e}")
                 # Create dummy metrics for failed generation
                 turn_metrics.append(GenerationMetrics(
-                    prompt_tokens=estimated_prompt_tokens,
+                    prompt_tokens=estimated_tokens,
                     completion_tokens=0,
-                    total_tokens=estimated_prompt_tokens,
+                    total_tokens=estimated_tokens,
                     time_to_first_token=0,
                     total_generation_time=0,
                     tokens_per_second=0,
-                    engine_name="vllm",
-                    model_name=os.path.basename(self.model_name)
+                    engine_name=self.engine_type,
+                    model_name="unknown"
                 ))
         
         total_time = time.time() - total_start_time
         
-        # Calculate aggregate metrics
+        # Calculate summary metrics
         total_tokens_generated = sum(m.completion_tokens for m in turn_metrics)
         avg_tokens_per_second = (
             sum(m.tokens_per_second for m in turn_metrics) / len(turn_metrics)
             if turn_metrics else 0
         )
-        
-        # Calculate cache effectiveness as timing delta between first and second message
-        cache_effectiveness = None
-        if len(turn_metrics) >= 2:
-            first_ttft = turn_metrics[0].time_to_first_token
-            second_ttft = turn_metrics[1].time_to_first_token
-            if first_ttft is not None and second_ttft is not None and first_ttft > 0:
-                cache_effectiveness = first_ttft - second_ttft
         
         result = ConversationBenchmarkResult(
             conversation_name=conversation.name,
@@ -228,122 +203,44 @@ class BenchmarkRunner:
             turn_metrics=turn_metrics,
             avg_tokens_per_second=avg_tokens_per_second,
             total_tokens_generated=total_tokens_generated,
-            cache_effectiveness=cache_effectiveness,
+            cache_effectiveness=None,
             timestamp=datetime.now()
         )
         
-        # Add enhanced metadata
+        # Add metadata
         result.conversation_metadata = {
             "description": conversation.description,
             "tags": conversation.tags,
-            "estimated_final_tokens": conversation.estimated_final_tokens,
-            "actual_final_context": sum(len(msg["content"]) for msg in conversation_history) // 4,
             "rag_simulation": any(msg.message_type == MessageType.RAG_DATA for msg in conversation.messages),
-            "max_context_usage": max((m.turn_metadata.get("context_usage_percent", 0) for m in turn_metrics), default=0)
+            "final_context_tokens": self.estimate_conversation_tokens(conversation_history)
         }
         
-        print(f"\\nSummary:")
-        print(f"   Total turns: {len(turn_metrics)}")
-        print(f"   Time: {total_time:.3f}s")
-        print(f"   Tokens generated: {total_tokens_generated}")
-        print(f"   Speed: {avg_tokens_per_second:.1f} tok/s")
-        if cache_effectiveness:
-            print(f"   Cache effectiveness: {cache_effectiveness:.3f}s")
+        print(f"\\nCompleted: {len(turn_metrics)} turns, {total_tokens_generated} tokens, {avg_tokens_per_second:.1f} tok/s")
         
         return result
     
-    def _get_server_config_dict(self) -> Dict[str, Any]:
-        """Get server configuration dictionary for cache hash generation."""
-        return {
-            'gpu_memory_utilization': 0.6,  # Common default
-            'max_model_len': 32768,  # Common default
-            'quantization': 'gptq_marlin' if 'gptq' in self.model_name.lower() else None,
-            'enable_prefix_caching': True,
-            'dtype': 'auto',
-            'tensor_parallel_size': 1,
-            'enforce_eager': False,
-        }
-    
-    def check_compilation_status(self) -> Dict[str, Any]:
-        """Check detailed compilation status for the current model."""
-        config_dict = self._get_server_config_dict()
-        return self.compilation_cache.get_cache_info(self.model_name, config_dict)
-    
-    def is_compiled(self) -> bool:
-        """Check if current model configuration is compiled."""
-        config_dict = self._get_server_config_dict()
-        return self.compilation_cache.is_compiled(self.model_name, config_dict)
-    
-    def start_vllm_server(self, auto_start: bool = False) -> bool:
-        """Start vLLM server with proper monitoring and error handling.
+    def run_benchmark(self, 
+                     include_tags: Optional[List[str]] = None,
+                     exclude_tags: Optional[List[str]] = None,
+                     max_conversations: Optional[int] = None) -> Dict[str, str]:
+        """Run the complete benchmark suite"""
         
-        Args:
-            auto_start: If True, start server automatically. If False, ask user.
-            
-        Returns:
-            True if server is ready, False otherwise
-        """
-        # Check if server is already running
-        status, pid, message = detect_vllm_server(self.port, self.host)
-        if status == "ready":
-            print(f"Server already running on {self.host}:{self.port}")
-            return True
+        print("HomeLLM Benchmark Suite")
+        print("=" * 50)
         
-        if not auto_start:
-            print(f"Start vLLM server? (y/n)")
-            response = input().strip().lower()
-            if response not in ['y', 'yes']:
-                return False
+        # Check server health
+        if not self.check_server_health():
+            print(f"Error: No server responding at {self.host}:{self.port}")
+            print("Start your server first:")
+            print(f"  vllm serve <model> --host {self.host} --port {self.port}")
+            return {}
         
-        # Start server using the new manager
-        print(f"Starting vLLM server for {self.model_name}...")
-        print(f"Server will be available at http://{self.host}:{self.port}")
+        print(f"✓ Server healthy at {self.host}:{self.port}")
         
-        config_dict = self._get_server_config_dict()
-        
-        try:
-            manager = VLLMServerManager(self.host, self.port)
-            result = manager.start_server(
-                model_path=self.model_name,
-                gpu_memory_utilization=config_dict.get('gpu_memory_utilization', 0.6),
-                max_model_len=config_dict.get('max_model_len', 32768),
-                enable_prefix_caching=config_dict.get('enable_prefix_caching', True),
-                enforce_eager=config_dict.get('enforce_eager', False),
-                disable_log_stats=True,
-                disable_log_requests=True,
-            )
-            
-            if result.success:
-                print(f"Server started successfully in {result.startup_time:.1f}s")
-                server_info = manager.get_server_info()
-                print(f"Model: {server_info.get('model', 'Unknown')}")
-                print(f"Process ID: {server_info.get('process_id')}")
-                return True
-            else:
-                print(f"Failed to start server: {result.error_message}")
-                return False
-                
-        except Exception as e:
-            print(f"Error starting server: {e}")
-            return False
-    
-    def run_complete_benchmark(self, 
-                             include_tags: Optional[List[str]] = None,
-                             exclude_tags: Optional[List[str]] = None,
-                             max_conversations: Optional[int] = None) -> Dict[str, str]:
-        """Run complete enhanced benchmark suite"""
-        print("Enhanced LLM Benchmark Suite")
-        print("=" * 80)
-        print(f"Model: {self.model_name}")
-        print(f"Context size: {self.model_context_size:,} tokens")
-        print(f"Output: results/")
-        
-        # Collect initial system information
-        print("\\nCollecting system information...")
+        # Collect system info
         system_info = self.deps.system_collector.get_complete_system_info()
         
-        # Select appropriate conversations
-        print("\\nSelecting conversations...")
+        # Select conversations
         conversations = self.select_conversations(
             include_tags=include_tags,
             exclude_tags=exclude_tags,
@@ -351,75 +248,22 @@ class BenchmarkRunner:
         )
         
         if not conversations:
-            print("Failed: No suitable conversations found for this context size")
+            print("No conversations selected")
             return {}
-        
-        # Check compilation status
-        print("\\nChecking compilation status...")
-        config_dict = self._get_server_config_dict()
-        if self.compilation_cache.is_compiled(self.model_name, config_dict):
-            print(f"Found compiled cache for {self.model_name}")
-        else:
-            print(f"No compiled cache found for {self.model_name}")
-            print("Note: First run will include compilation time")
-        
-        # Check vLLM server is running
-        print("\\nChecking vLLM server...")
-        status, pid, message = detect_vllm_server(self.port, self.host)
-        
-        if status == "not_running":
-            print(f"No server running on {self.host}:{self.port}")
-            auto_start = getattr(self, 'auto_start_server', False)
-            if not self.start_vllm_server(auto_start=auto_start):
-                print("Failed: Cannot run benchmark without vLLM server")
-                return {}
-        
-        elif status == "starting_up":
-            print(f"STARTING: {message}")
-            print(f"Waiting for server to become ready...")
-            if not wait_for_server_ready(self.port, self.host, max_wait=120):
-                print("Failed: Server did not become ready within 2 minutes")
-                return {}
-        
-        elif status == "port_busy":
-            print(f"ERROR: {message}")
-            print(f"Stop the other service or use a different port with --server-port")
-            return {}
-        
-        elif status == "ready":
-            print(f"READY: {message}")
-            # Show server info
-            if pid:
-                info = get_vllm_process_info(pid)
-                if info:
-                    print(f"   Model: {info['model']}")
-                    print(f"   Memory: {info['memory_mb']:.1f}MB")
-        
-        print(f"Server ready on {self.host}:{self.port}")
-        
-        # Warmup
-        print("Warming up model...")
-        if not self.engine.warmup():
-            print("Warning: Warmup failed, but continuing...")
         
         # Run benchmarks
         results = []
         for i, conversation in enumerate(conversations, 1):
-            print(f"\\n{'='*80}")
-            print(f"Running benchmark {i}/{len(conversations)}")
+            print(f"\\n{'='*60}")
+            print(f"Benchmark {i}/{len(conversations)}")
             result = self.run_conversation_benchmark(conversation)
             results.append(result)
         
-        # Collect final system metrics
-        final_system_metrics = self.deps.system_collector.get_runtime_metrics()
-        
-        # Prepare enhanced configuration info
+        # Save results
         config_info = {
-            "model_name": self.model_name,
-            "model_context_size": self.model_context_size,
-            "server_host": self.host,
-            "server_port": self.port,
-            "server_type": "external_vllm",
+            "endpoint": f"{self.host}:{self.port}",
+            "engine_type": self.engine_type,
+            "context_size": self.context_size,
             "conversation_selection": {
                 "include_tags": include_tags,
                 "exclude_tags": exclude_tags,
@@ -428,140 +272,88 @@ class BenchmarkRunner:
             }
         }
         
-        # Combine system info
-        combined_system_info = {
-            **system_info,
-            "final_metrics": final_system_metrics,
-            "conversation_summary": {
-                "total_conversations": len(results),
-                "total_turns": sum(r.total_turns for r in results),
-                "total_tokens_generated": sum(r.total_tokens_generated for r in results),
-                "total_time": sum(r.total_time for r in results),
-                "rag_simulations": sum(1 for r in results if r.conversation_metadata.get("rag_simulation", False))
-            }
-        }
-        
-        # Save results in multiple formats
-        print("\\nSaving enhanced benchmark results...")
+        print("\\nSaving results...")
         files_created = self.deps.formatter.save_results(
             conversation_results=results,
-            system_info=combined_system_info,
+            system_info=system_info,
             config_info=config_info
         )
         
         # Print summary
-        print("\\nComplete: Enhanced benchmark completed successfully!")
-        print("\\nSummary:")
-        print(f"   Conversations: {len(results)}")
-        print(f"   Total turns: {sum(r.total_turns for r in results)}")
-        print(f"   Tokens generated: {sum(r.total_tokens_generated for r in results):,}")
-        print(f"   Time: {sum(r.total_time for r in results):.1f}s")
-        print(f"   Speed: {sum(r.avg_tokens_per_second for r in results)/len(results):.1f} tok/s")
+        total_tokens = sum(r.total_tokens_generated for r in results)
+        total_time = sum(r.total_time for r in results)
+        avg_speed = sum(r.avg_tokens_per_second for r in results) / len(results)
         
-        rag_count = sum(1 for r in results if r.conversation_metadata.get("rag_simulation", False))
-        if rag_count > 0:
-            print(f"   RAG simulations: {rag_count}")
+        print(f"\\nBenchmark Complete!")
+        print(f"  Conversations: {len(results)}")
+        print(f"  Total tokens: {total_tokens:,}")
+        print(f"  Total time: {total_time:.1f}s")
+        print(f"  Average speed: {avg_speed:.1f} tok/s")
         
-        print("\\nFiles created:")
+        print(f"\\nFiles created:")
         for format_type, path in files_created.items():
-            print(f"   File {format_type}: {path}")
-            
+            print(f"  {format_type}: {path}")
+        
         return files_created
 
 
 def main():
-    """Main enhanced benchmark execution"""
+    """Main CLI entry point"""
     import argparse
     
-    parser = argparse.ArgumentParser(description="Enhanced LLM Benchmark Runner")
-    parser.add_argument("--model", type=str, default="./phi-3.5-mini-Q4_K.gguf", help="Model name (same as used to start vLLM server)")
-    parser.add_argument("--context-size", type=int, default=128000, help="Model context size")
-    parser.add_argument("--include-tags", nargs="+", help="Include only conversations with these tags")
-    parser.add_argument("--exclude-tags", nargs="+", help="Exclude conversations with these tags")
-    parser.add_argument("--max-conversations", type=int, help="Maximum number of conversations to run")
-    parser.add_argument("--list-conversations", action="store_true", help="List available conversations and exit")
-    parser.add_argument("--server-port", type=int, default=DEFAULT_VLLM_PORT, help=f"Port of vLLM server (default: {DEFAULT_VLLM_PORT})")
-    parser.add_argument("--gpu-runtime", 
-                       choices=["cuda", "rocm", "xpu"],
-                       default="cuda",
-                       help="GPU runtime to use (only cuda supported currently)")
-    parser.add_argument("--check-compilation", action="store_true", 
-                       help="Check compilation status and exit")
-    parser.add_argument("--compilation-info", action="store_true", 
-                       help="Show detailed compilation cache information")
-    parser.add_argument("--auto-start-server", action="store_true",
-                       help="Automatically start vLLM server if not running")
+    parser = argparse.ArgumentParser(
+        description="HomeLLM Benchmark Runner - Connect to any OpenAI-compatible chat completions endpoint"
+    )
+    
+    # Server connection
+    parser.add_argument("--host", default="127.0.0.1", help="Server host (default: 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"Server port (default: {DEFAULT_PORT})")
+    parser.add_argument("--engine", choices=["vllm", "ollama"], default="vllm", 
+                       help="Engine type for metrics collection (default: vllm)")
+    parser.add_argument("--model", default="Qwen/Qwen2.5-3B-Instruct-GPTQ-Int4",
+                       help="Model name for API calls (default: Qwen/Qwen2.5-3B-Instruct-GPTQ-Int4)")
+    
+    # Benchmark configuration
+    parser.add_argument("--context-size", type=int, default=DEFAULT_CONTEXT_SIZE, 
+                       help=f"Context size in tokens (default: {DEFAULT_CONTEXT_SIZE})")
+    parser.add_argument("--max-conversations", type=int, 
+                       help="Maximum number of conversations to run")
+    
+    # Conversation filtering
+    parser.add_argument("--include-tags", nargs="+", 
+                       help="Include only conversations with these tags")
+    parser.add_argument("--exclude-tags", nargs="+", 
+                       help="Exclude conversations with these tags")
+    
+    # Utilities
+    parser.add_argument("--list-conversations", action="store_true", 
+                       help="List available conversations and exit")
     
     args = parser.parse_args()
     
-    # Check if we should just list conversations
+    # List conversations if requested
     if args.list_conversations:
         deps = BenchmarkDependencies()
         deps.conversation_loader.list_available_conversations(args.context_size)
         return
     
-    # Check compilation status if requested
-    if args.check_compilation or args.compilation_info:
-        runner = BenchmarkRunner(args.model, args.context_size, port=args.server_port)
-        
-        if args.check_compilation:
-            if runner.is_compiled():
-                print(f"Model {args.model} is compiled")
-            else:
-                print(f"Model {args.model} is not compiled")
-            return
-        
-        if args.compilation_info:
-            info = runner.check_compilation_status()
-            print(f"Compilation Info for {args.model}:")
-            print(f"  Cache Hash: {info['cache_hash']}")
-            print(f"  Cache Path: {info['cache_path']}")
-            print(f"  Cache Exists: {info['exists']}")
-            print(f"  Is Compiled: {info['is_compiled']}")
-            if info['files']:
-                print(f"  Cache Files:")
-                for file_info in info['files']:
-                    print(f"    {file_info['name']}: {file_info['size_mb']:.1f}MB")
-            return
-    
-    # Initialize system info
-    from ..utils.system_info import initialize_system, GPURuntime
-    initialize_system(GPURuntime(args.gpu_runtime))
-    
-    # Note: We don't check if model file exists since server handles the model
-    model_name = args.model
-    
-    print("Enhanced LLM Benchmark Suite")
-    print("=" * 50)
-    print(f"Model: {model_name}")
-    print(f"Context: {args.context_size:,} tokens")
-    if args.include_tags:
-        print(f"Include tags: {args.include_tags}")
-    if args.exclude_tags:
-        print(f"Exclude tags: {args.exclude_tags}")
-    if args.max_conversations:
-        print(f"Max conversations: {args.max_conversations}")
-    
     # Create and run benchmark
     runner = BenchmarkRunner(
-        model_name=model_name,
-        model_context_size=args.context_size,
-        port=args.server_port
+        host=args.host,
+        port=args.port,
+        context_size=args.context_size,
+        engine_type=args.engine,
+        model_name=args.model
     )
     
-    # Set auto-start server flag
-    runner.auto_start_server = args.auto_start_server
-    
-    files_created = safe_execute(
-        runner.run_complete_benchmark,
-        "benchmark execution",
+    files_created = runner.run_benchmark(
         include_tags=args.include_tags,
         exclude_tags=args.exclude_tags,
         max_conversations=args.max_conversations
     )
     
-    print(f"\\nComplete: Enhanced benchmark complete!")
-    print(f"Open the markdown file for a detailed report.")
+    if files_created:
+        print(f"\\nOpen the markdown file for detailed results.")
 
 
 if __name__ == "__main__":

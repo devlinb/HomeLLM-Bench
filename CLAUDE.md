@@ -8,75 +8,72 @@ HomeLLM-Bench is a benchmark framework for testing LLM models with focus on sing
 
 ## Development Commands
 
-### Two-Step Workflow (Required)
+### Two-Step Workflow
 
-**Step 1: Start vLLM Server**
+**Step 1: Start Your LLM Server**
 ```bash
-# Phi-3 Debug mode (no compilation, optimized for single-user testing)
-python start_debug_vllm.py
+# Start vLLM server (recommended)
+vllm serve <model_path> --host 127.0.0.1 --port 8000
 
-# Phi-3 Production mode (with optimizations)
-python start_optimized_vllm.py
+# Examples:
+vllm serve Qwen/Qwen2.5-3B-Instruct-GPTQ-Int4 --port 8000
+vllm serve microsoft/Phi-3.5-mini-instruct --port 8000
 
-# Qwen Optimized mode (16K context, single-user, GPTQ)
-python start_qwen_vllm.py --port 8002
+# For Ollama (future support)
+ollama serve --host 127.0.0.1 --port 8000
 ```
 
 **Step 2: Run Benchmarks**
 ```bash
-# Run Phi-3 benchmark (default port 8001)
-python enhanced_benchmark_runner.py
+# Basic benchmark run (connects to localhost:8000)
+python -m homellm_bench.cli.benchmark
 
-# Run Qwen benchmark (port 8002)
-python enhanced_benchmark_runner.py --model "Qwen/Qwen2.5-3B-Instruct-GPTQ-Int4" --server-port 8002
+# Specify custom host/port
+python -m homellm_bench.cli.benchmark --host 127.0.0.1 --port 8000
 
-# List available conversations for specific context size
-python enhanced_benchmark_runner.py --list-conversations --context-size 128000
+# Configure context size and engine type
+python -m homellm_bench.cli.benchmark --context-size 16000 --engine vllm
 
-# Run specific test types with tags
-python enhanced_benchmark_runner.py --include-tags rag,long
+# Filter conversations by tags
+python -m homellm_bench.cli.benchmark --include-tags rag,coding --max-conversations 5
 
-# Limit number of conversations
-python enhanced_benchmark_runner.py --max-conversations 3
+# List available conversations
+python -m homellm_bench.cli.benchmark --list-conversations
 ```
 
 ### Model Management
 
+Use standard methods to download and manage models:
+
 ```bash
-# Setup recommended model
-python download_models.py --setup
+# Download models directly with Hugging Face
+huggingface-cli download Qwen/Qwen2.5-3B-Instruct-GPTQ-Int4
 
-# List available models
-python download_models.py --list
-
-# Download specific model
-python download_models.py --model phi-3.5-mini-4bit
+# Or let vLLM download automatically
+vllm serve Qwen/Qwen2.5-3B-Instruct-GPTQ-Int4
 ```
 
-### vLLM Server Configurations
+### vLLM Server Configuration
 
-**Phi-3 Debug Mode** (`start_debug_vllm.py`):
-- 8K context window (8,192 tokens)
-- 50% GPU memory utilization
-- No CUDA compilation (`enforce_eager=True`)
-- Single concurrent sequence
-- Request logging enabled
-- Optimized for development and testing
+The benchmark tool connects to any OpenAI-compatible chat completions endpoint. For best results with vLLM:
 
-**Phi-3 Production Mode** (`start_optimized_vllm.py`):
-- 16K context window (configurable)
-- 60% GPU memory utilization
-- CUDA optimizations enabled
-- Prefix caching enabled
-- Request logging disabled
+```bash
+# Recommended vLLM settings for benchmarking
+vllm serve <model> \
+  --host 127.0.0.1 \
+  --port 8000 \
+  --max-model-len 16384 \
+  --gpu-memory-utilization 0.8 \
+  --max-num-seqs 1 \
+  --enable-prefix-caching \
+  --disable-log-requests
+```
 
-**Qwen Optimized Mode** (`start_qwen_vllm.py`):
-- 16K context window (16,384 tokens)
-- 60% GPU memory utilization
-- GPTQ quantization for efficiency
-- Single-user optimized (max_num_seqs=1)
-- Prefix caching enabled
-- ~4.95 GB VRAM usage (fits in 8GB easily)
+**Key Parameters:**
+- `--max-model-len`: Set to match your benchmark context size
+- `--gpu-memory-utilization`: Adjust based on available GPU memory
+- `--max-num-seqs 1`: Single sequence for consistent benchmarking
+- `--enable-prefix-caching`: Better performance for multi-turn conversations
 
 ### Testing Individual Components
 

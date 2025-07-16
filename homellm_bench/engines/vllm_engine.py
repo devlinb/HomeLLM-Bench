@@ -12,7 +12,7 @@ class VLLMEngine:
     """Client for connecting to external vLLM server and collecting metrics"""
     
     def __init__(self, 
-                 model_name: str,
+                 model_name: str = "Qwen/Qwen2.5-3B-Instruct-GPTQ-Int4",
                  host: str = "127.0.0.1",
                  port: int = 8001):
         
