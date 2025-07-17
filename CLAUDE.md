@@ -19,16 +19,26 @@ vllm serve <model_path> --host 127.0.0.1 --port 8000
 vllm serve Qwen/Qwen2.5-3B-Instruct-GPTQ-Int4 --port 8000
 vllm serve microsoft/Phi-3.5-mini-instruct --port 8000
 
-# For Ollama (future support)
-ollama serve --host 127.0.0.1 --port 8000
+# Start Ollama server (default port 11434)
+ollama serve
+
+# Pull and run Ollama models
+ollama pull llama3.2:3b
+ollama pull qwen2.5:3b
 ```
 
 **Step 2: Run Benchmarks**
 ```bash
-# Basic benchmark run (connects to localhost:8000)
+# Basic benchmark run (connects to localhost:8000 for vLLM)
 python -m homellm_bench.cli.benchmark
 
-# Specify custom host/port
+# Run with Ollama (connects to localhost:11434)
+python -m homellm_bench.cli.benchmark --engine ollama
+
+# Run with Ollama and specific model
+python -m homellm_bench.cli.benchmark --engine ollama --model llama3.2:3b
+
+# Specify custom host/port for any engine
 python -m homellm_bench.cli.benchmark --host 127.0.0.1 --port 8000
 
 # Configure context size and engine type
@@ -43,14 +53,29 @@ python -m homellm_bench.cli.benchmark --list-conversations
 
 ### Model Management
 
-Use standard methods to download and manage models:
-
+**vLLM Models**:
 ```bash
 # Download models directly with Hugging Face
 huggingface-cli download Qwen/Qwen2.5-3B-Instruct-GPTQ-Int4
 
 # Or let vLLM download automatically
 vllm serve Qwen/Qwen2.5-3B-Instruct-GPTQ-Int4
+```
+
+**Ollama Models**:
+```bash
+# Pull models from Ollama registry
+ollama pull llama3.2:1b
+ollama pull llama3.2:3b
+ollama pull qwen2.5:1.5b
+ollama pull qwen2.5:3b
+ollama pull phi3.5:3.8b
+
+# List available models
+ollama list
+
+# Remove models
+ollama rm llama3.2:3b
 ```
 
 ### vLLM Server Configuration
@@ -120,16 +145,18 @@ python test_rag_simulation.py
 - Context size estimation and model compatibility checking
 - Message types: normal, rag_data, rag_query, rag_removal, continuation
 
-**Inference Engine** (`engines/vllm_engine.py`):
-- Client connector to external vLLM servers
+**Inference Engines**:
+- `engines/vllm_engine.py`: Client connector to external vLLM servers
+- `engines/ollama_engine.py`: Client connector to external Ollama servers
 - Integrated metrics collection during generation
 - Health checking and connection validation
-- Support for both chat completions and text completions
+- Support for chat completions with engine-specific optimizations
 
 **Metrics Collection** (`metrics/`):
 - `vllm_collector.py`: vLLM-specific metrics (prefill/decode time, cache hits)
+- `ollama_collector.py`: Ollama-specific metrics (load time, eval time, precise nanosecond timing)
 - `system_collector.py`: System resource metrics (GPU, CPU, memory)
-- `schemas.py`: Pydantic models for all metrics data
+- `schemas.py`: Pydantic models for all metrics data (GenerationMetrics, VLLMMetrics, OllamaMetrics)
 
 **Chat Templates** (`templates/`):
 - `phi3.py`: Phi-3.5 chat format with proper token handling
@@ -196,14 +223,23 @@ vllm_metrics = vllm_collector.collect_generation_metrics(response)
 ### Model Compatibility
 
 **Supported Models**:
+
+*vLLM Compatible*:
 - Phi-3.5 series (primary target)
+- Qwen 2.5 series
 - Quantized models (4-bit, 8-bit)
 - Models with 128K+ context support
 
+*Ollama Compatible*:
+- Llama 3.2: `llama3.2:1b`, `llama3.2:3b`
+- Qwen 2.5: `qwen2.5:1.5b`, `qwen2.5:3b`
+- Phi-3.5: `phi3.5:3.8b`
+- And any other models in Ollama registry
+
 **Model Requirements**:
 - Chat template compatibility
-- OpenAI API compatibility via vLLM
-- Sufficient GPU memory (8GB+ recommended)
+- OpenAI API compatibility (vLLM) or Ollama API compatibility
+- Sufficient GPU memory (8GB+ recommended for vLLM, varies for Ollama)
 
 ## Conversation Types
 
@@ -319,34 +355,60 @@ pip install vllm pydantic requests psutil pynvml
 
 ## Workflow Examples
 
-### Quick Testing (Debug Mode)
+### Quick Testing with vLLM
 ```bash
-# Terminal 1: Start debug server
-python start_debug_vllm.py
+# Terminal 1: Start vLLM server
+vllm serve Qwen/Qwen2.5-3B-Instruct-GPTQ-Int4 --port 8000
 
 # Terminal 2: Run quick test
-python enhanced_benchmark_runner.py --max-conversations 1
+python -m homellm_bench.cli.benchmark --max-conversations 1
+```
+
+### Quick Testing with Ollama
+```bash
+# Terminal 1: Start Ollama server
+ollama serve
+
+# Terminal 2: Run quick test
+python -m homellm_bench.cli.benchmark --engine ollama --max-conversations 1
 ```
 
 ### Production Benchmarking
 ```bash
-# Terminal 1: Start production server
-python start_optimized_vllm.py
+# vLLM benchmarking
+vllm serve <model> --port 8000
+python -m homellm_bench.cli.benchmark
 
-# Terminal 2: Run full benchmark suite
-python enhanced_benchmark_runner.py
+# Ollama benchmarking  
+ollama serve
+python -m homellm_bench.cli.benchmark --engine ollama
 ```
 
 ### Testing Specific Scenarios
 ```bash
 # Start appropriate server first, then:
-python enhanced_benchmark_runner.py --include-tags rag,long --max-conversations 5
+python -m homellm_bench.cli.benchmark --include-tags rag,long --max-conversations 5
+
+# Compare engines on same conversations
+python -m homellm_bench.cli.benchmark --engine vllm --include-tags coding
+python -m homellm_bench.cli.benchmark --engine ollama --include-tags coding
 ```
 
 ## Adding New Models
 
-1. **Download Model**: Add to `download_models.py`
-2. **Start Server**: Use existing server scripts with new model path
+### For vLLM
+1. **Download Model**: Use `huggingface-cli download <model_name>` or let vLLM download automatically
+2. **Start Server**: `vllm serve <model_path> --port 8000`
 3. **Chat Template**: Create new template in `templates/` if needed
 4. **Test**: Run benchmarks with `--model <new_model_path>`
 5. **Documentation**: Update supported models list
+
+### For Ollama
+1. **Check Availability**: Browse [Ollama Models](https://ollama.com/models) or use `ollama list`
+2. **Pull Model**: `ollama pull <model_name>`
+3. **Test**: Run benchmarks with `--engine ollama --model <model_name>`
+4. **Documentation**: Update supported models list
+
+### Engine Comparison
+- **vLLM**: Better for production workloads, quantized models, fine-tuned models
+- **Ollama**: Better for ease of use, model management, local development

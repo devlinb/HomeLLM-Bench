@@ -7,6 +7,8 @@ Constants for HomeLLM-Bench - keeping it simple
 # =============================================================================
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
+VLLM_DEFAULT_PORT = 8000
+OLLAMA_DEFAULT_PORT = 11434
 REQUEST_TIMEOUT = 60
 
 # =============================================================================

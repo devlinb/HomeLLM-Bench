@@ -63,6 +63,8 @@ class BenchmarkFormatter:
                 'avg_tokens_per_second',
                 'cache_effectiveness',
                 'timestamp',
+                'engine_name',
+                'model_name',
                 # Per-turn averages
                 'avg_prompt_tokens',
                 'avg_completion_tokens', 
@@ -84,6 +86,10 @@ class BenchmarkFormatter:
                 else:
                     avg_prompt_tokens = avg_completion_tokens = avg_generation_time = avg_ttft = 0
                 
+                # Extract engine info from first turn if available
+                engine_name = turn_metrics[0].engine_name if turn_metrics else "unknown"
+                model_name = turn_metrics[0].model_name if turn_metrics else "unknown"
+                
                 writer.writerow({
                     'conversation_name': result.conversation_name,
                     'total_turns': result.total_turns,
@@ -92,6 +98,8 @@ class BenchmarkFormatter:
                     'avg_tokens_per_second': round(result.avg_tokens_per_second, 1),
                     'cache_effectiveness': round(result.cache_effectiveness or 0, 3),
                     'timestamp': result.timestamp.isoformat(),
+                    'engine_name': engine_name,
+                    'model_name': model_name,
                     'avg_prompt_tokens': round(avg_prompt_tokens, 1),
                     'avg_completion_tokens': round(avg_completion_tokens, 1),
                     'avg_generation_time': round(avg_generation_time, 3),
@@ -150,6 +158,13 @@ class BenchmarkFormatter:
             f.write("|---------|-------|\n")
             for key, value in config_info.items():
                 f.write(f"| {key} | {value} |\n")
+            
+            # Add engine info if available from results
+            if results and results[0].turn_metrics:
+                first_metric = results[0].turn_metrics[0]
+                f.write(f"| Engine | {first_metric.engine_name} |\n")
+                f.write(f"| Model | {first_metric.model_name} |\n")
+            
             f.write("\n")
             
             # Overall Results Summary

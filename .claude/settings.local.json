@@ -31,7 +31,9 @@
       "Bash(env)",
       "Bash(export:*)",
       "Bash(export VLLM_ATTENTION_BACKEND=FLASHINFER)",
-      "Bash(/venv/main/bin/python3 /venv/main/bin/vllm serve Qwen/Qwen2.5-3B-Instruct-GPTQ-Int4 --max-model-len 8192 --enforce-eager --download-dir /workspace/models --host 127.0.0.1 --port 8002 --tensor-parallel-size 2)"
+      "Bash(/venv/main/bin/python3 /venv/main/bin/vllm serve Qwen/Qwen2.5-3B-Instruct-GPTQ-Int4 --max-model-len 8192 --enforce-eager --download-dir /workspace/models --host 127.0.0.1 --port 8002 --tensor-parallel-size 2)",
+      "WebFetch(domain:github.com)",
+      "Bash(ollama list:*)"
     ],
     "deny": []
   }

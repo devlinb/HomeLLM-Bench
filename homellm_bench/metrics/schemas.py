@@ -53,6 +53,29 @@ class VLLMMetrics(BaseModel):
     raw_metrics: Dict[str, Any] = Field(default_factory=dict, description="Raw metrics from vLLM")
 
 
+class OllamaMetrics(BaseModel):
+    """Ollama-specific metrics parsed from server responses"""
+    
+    # Ollama timing metrics (converted from nanoseconds)
+    total_duration_seconds: Optional[float] = Field(default=None, description="Total request duration")
+    load_duration_seconds: Optional[float] = Field(default=None, description="Model loading time")
+    prompt_eval_duration_seconds: Optional[float] = Field(default=None, description="Prompt evaluation time")
+    eval_duration_seconds: Optional[float] = Field(default=None, description="Response generation time")
+    
+    # Ollama token counts
+    prompt_eval_count: Optional[int] = Field(default=None, description="Tokens in prompt evaluation")
+    eval_count: Optional[int] = Field(default=None, description="Tokens in response generation")
+    
+    # Ollama raw metrics (in nanoseconds)
+    total_duration_ns: Optional[int] = Field(default=None, description="Total duration in nanoseconds")
+    load_duration_ns: Optional[int] = Field(default=None, description="Load duration in nanoseconds")
+    prompt_eval_duration_ns: Optional[int] = Field(default=None, description="Prompt eval duration in nanoseconds")
+    eval_duration_ns: Optional[int] = Field(default=None, description="Eval duration in nanoseconds")
+    
+    # Raw metrics data
+    raw_metrics: Dict[str, Any] = Field(default_factory=dict, description="Raw metrics from Ollama")
+
+
 class ConversationBenchmarkResult(BaseModel):
     """Results from benchmarking a single conversation"""
     

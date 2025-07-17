@@ -13,7 +13,7 @@ from ..metrics.schemas import GenerationMetrics, ConversationBenchmarkResult
 from ..schemas.conversation import Conversation, Message, MessageRole, MessageType
 from ..utils.benchmark_dependencies import BenchmarkDependencies
 from ..utils.exceptions import safe_execute
-from ..config.constants import DEFAULT_MAX_TOKENS, DEFAULT_TEMPERATURE, TOKEN_ESTIMATION_DIVISOR, DEFAULT_PORT, DEFAULT_CONTEXT_SIZE
+from ..config.constants import DEFAULT_MAX_TOKENS, DEFAULT_TEMPERATURE, TOKEN_ESTIMATION_DIVISOR, DEFAULT_PORT, DEFAULT_CONTEXT_SIZE, VLLM_DEFAULT_PORT, OLLAMA_DEFAULT_PORT
 
 
 class BenchmarkRunner:
@@ -41,8 +41,8 @@ class BenchmarkRunner:
             from ..engines.vllm_engine import VLLMEngine
             self.engine = VLLMEngine(model_name=model_name, host=host, port=port)
         elif self.engine_type == "ollama":
-            # Future: OllamaEngine would go here
-            raise NotImplementedError("Ollama support not yet implemented")
+            from ..engines.ollama_engine import OllamaEngine
+            self.engine = OllamaEngine(model_name=model_name, host=host, port=port)
         else:
             raise ValueError(f"Unsupported engine type: {engine_type}")
         
@@ -307,11 +307,10 @@ def main():
     
     # Server connection
     parser.add_argument("--host", default="127.0.0.1", help="Server host (default: 127.0.0.1)")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"Server port (default: {DEFAULT_PORT})")
+    parser.add_argument("--port", type=int, help="Server port (default: engine-specific)")
     parser.add_argument("--engine", choices=["vllm", "ollama"], default="vllm", 
-                       help="Engine type for metrics collection (default: vllm)")
-    parser.add_argument("--model", default="Qwen/Qwen2.5-3B-Instruct-GPTQ-Int4",
-                       help="Model name for API calls (default: Qwen/Qwen2.5-3B-Instruct-GPTQ-Int4)")
+                       help="Engine type for metrics collection (default: vllm, port 8000; ollama uses port 11434)")
+    parser.add_argument("--model", help="Model name for API calls (default: engine-specific)")
     
     # Benchmark configuration
     parser.add_argument("--context-size", type=int, default=DEFAULT_CONTEXT_SIZE, 
@@ -330,6 +329,13 @@ def main():
                        help="List available conversations and exit")
     
     args = parser.parse_args()
+    
+    # Set engine-specific defaults
+    if args.port is None:
+        args.port = OLLAMA_DEFAULT_PORT if args.engine == "ollama" else VLLM_DEFAULT_PORT
+    
+    if args.model is None:
+        args.model = "llama3.2:3b" if args.engine == "ollama" else "Qwen/Qwen2.5-3B-Instruct-GPTQ-Int4"
     
     # List conversations if requested
     if args.list_conversations:
