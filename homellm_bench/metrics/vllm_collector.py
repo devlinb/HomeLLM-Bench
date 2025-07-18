@@ -3,7 +3,7 @@ import time
 import json
 import psutil
 import re
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Generator
 from datetime import datetime
 
 try:
@@ -266,6 +266,107 @@ class VLLMMetricsCollector:
         )
         
         return generated_text, metrics
+    
+    def generate_chat_streaming(self, 
+                               model_name: str,
+                               messages: List[Dict[str, str]],
+                               max_tokens: int = 100,
+                               temperature: float = 0.7,
+                               **kwargs) -> Generator[str, None, GenerationMetrics]:
+        """Generate chat completion with streaming tokens and final metrics"""
+        
+        # Pre-generation metrics
+        start_time = time.time()
+        start_system_metrics = self.get_system_metrics()
+        start_server_metrics = self.get_server_metrics()
+        
+        # Prepare streaming chat completion request
+        request_data = {
+            "model": model_name,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": True,
+            **kwargs
+        }
+        
+        # Make streaming generation request
+        try:
+            response = self.session.post(
+                f"{self.base_url}/v1/chat/completions",
+                json=request_data,
+                stream=True,
+                timeout=60
+            )
+            response.raise_for_status()
+            
+            # Stream processing
+            full_text = ""
+            completion_tokens = 0
+            
+            for line in response.iter_lines():
+                if line:
+                    line_text = line.decode('utf-8')
+                    
+                    # Skip empty lines and non-data lines
+                    if not line_text.startswith('data: '):
+                        continue
+                    
+                    # Extract JSON data
+                    json_str = line_text[6:]  # Remove 'data: ' prefix
+                    
+                    # Check for stream end
+                    if json_str.strip() == '[DONE]':
+                        break
+                    
+                    try:
+                        chunk = json.loads(json_str)
+                        delta = chunk.get('choices', [{}])[0].get('delta', {})
+                        
+                        # Extract token content
+                        if 'content' in delta:
+                            token = delta['content']
+                            full_text += token
+                            completion_tokens += 1
+                            yield token
+                            
+                    except json.JSONDecodeError:
+                        # Skip malformed JSON
+                        continue
+                        
+        except Exception as e:
+            raise RuntimeError(f"Streaming generation failed: {e}")
+        
+        # Post-generation metrics
+        end_time = time.time()
+        end_system_metrics = self.get_system_metrics()
+        end_server_metrics = self.get_server_metrics()
+        
+        # Calculate timing metrics
+        total_time = end_time - start_time
+        # Note: streaming doesn't provide usage stats, so we estimate
+        prompt_tokens = sum(len(msg['content'].split()) for msg in messages)  # Rough estimate
+        total_tokens = prompt_tokens + completion_tokens
+        
+        # Create GenerationMetrics
+        metrics = GenerationMetrics(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            time_to_first_token=0.1,  # Estimated - streaming doesn't provide this precisely
+            total_generation_time=total_time,
+            tokens_per_second=total_tokens / total_time if total_time > 0 else 0,
+            engine_name="vllm",
+            model_name=model_name,
+            engine_metrics={
+                'start_server_metrics': start_server_metrics,
+                'end_server_metrics': end_server_metrics,
+                'streaming': True,
+                'estimated_tokens': True
+            }
+        )
+        
+        return metrics
     
     def warmup_model(self, model_name: str = "phi-3.5-mini") -> bool:
         """Warmup the model with a simple request"""

@@ -25,6 +25,7 @@ class GenerationMetrics(BaseModel):
     engine_name: str = Field(..., description="Name of the inference engine")
     model_name: str = Field(..., description="Name of the model")
     turn_metadata: Dict[str, Any] = Field(default_factory=dict, description="Turn-specific metadata")
+    tts_metadata: Optional[Dict[str, Any]] = Field(default=None, description="TTS-specific metadata")
     
     class Config:
         json_encoders = {

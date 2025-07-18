@@ -2,7 +2,7 @@ import requests
 import time
 import json
 import psutil
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Generator
 from datetime import datetime
 
 try:
@@ -179,6 +179,122 @@ class OllamaMetricsCollector:
         )
         
         return generated_text, metrics
+    
+    def generate_chat_streaming(self, 
+                               model_name: str,
+                               messages: List[Dict[str, str]],
+                               max_tokens: int = 100,
+                               temperature: float = 0.7,
+                               **kwargs) -> Generator[str, None, GenerationMetrics]:
+        """Generate chat completion with streaming tokens and final metrics"""
+        
+        # Pre-generation metrics
+        start_time = time.time()
+        start_system_metrics = self.get_system_metrics()
+        
+        # Prepare Ollama streaming chat request
+        request_data = {
+            "model": model_name,
+            "messages": messages,
+            "stream": True,
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens,
+                **kwargs
+            }
+        }
+        
+        # Make streaming generation request
+        try:
+            response = self.session.post(
+                f"{self.base_url}/api/chat",
+                json=request_data,
+                stream=True,
+                timeout=60
+            )
+            response.raise_for_status()
+            
+            # Stream processing
+            full_text = ""
+            completion_tokens = 0
+            final_metrics = {}
+            
+            for line in response.iter_lines():
+                if line:
+                    try:
+                        chunk = json.loads(line.decode('utf-8'))
+                        
+                        # Extract token content
+                        message = chunk.get('message', {})
+                        if 'content' in message:
+                            token = message['content']
+                            full_text += token
+                            completion_tokens += 1
+                            yield token
+                        
+                        # Check if this is the final chunk with metrics
+                        if chunk.get('done', False):
+                            final_metrics = chunk
+                            break
+                            
+                    except json.JSONDecodeError:
+                        # Skip malformed JSON
+                        continue
+                        
+        except Exception as e:
+            raise RuntimeError(f"Streaming generation failed: {e}")
+        
+        # Post-generation metrics
+        end_time = time.time()
+        end_system_metrics = self.get_system_metrics()
+        
+        # Extract Ollama-specific metrics (all in nanoseconds)
+        total_duration = final_metrics.get('total_duration', 0)
+        load_duration = final_metrics.get('load_duration', 0)
+        prompt_eval_duration = final_metrics.get('prompt_eval_duration', 0)
+        eval_duration = final_metrics.get('eval_duration', 0)
+        
+        # Token counts
+        prompt_eval_count = final_metrics.get('prompt_eval_count', 0)
+        eval_count = final_metrics.get('eval_count', completion_tokens)
+        
+        # Convert nanoseconds to seconds
+        total_time_seconds = total_duration / 1_000_000_000 if total_duration > 0 else (end_time - start_time)
+        load_time_seconds = load_duration / 1_000_000_000
+        prompt_eval_time_seconds = prompt_eval_duration / 1_000_000_000
+        eval_time_seconds = eval_duration / 1_000_000_000
+        
+        # Calculate tokens per second
+        tokens_per_second = eval_count / eval_time_seconds if eval_time_seconds > 0 else 0
+        
+        # Create GenerationMetrics
+        metrics = GenerationMetrics(
+            prompt_tokens=prompt_eval_count,
+            completion_tokens=eval_count,
+            total_tokens=prompt_eval_count + eval_count,
+            time_to_first_token=prompt_eval_time_seconds,  # Time to process prompt and start generation
+            total_generation_time=total_time_seconds,
+            tokens_per_second=tokens_per_second,
+            engine_name="ollama",
+            model_name=model_name,
+            engine_metrics={
+                'ollama_metrics': {
+                    'total_duration_ns': total_duration,
+                    'load_duration_ns': load_duration,
+                    'prompt_eval_duration_ns': prompt_eval_duration,
+                    'eval_duration_ns': eval_duration,
+                    'load_time_seconds': load_time_seconds,
+                    'prompt_eval_time_seconds': prompt_eval_time_seconds,
+                    'eval_time_seconds': eval_time_seconds
+                },
+                'start_system_metrics': start_system_metrics,
+                'end_system_metrics': end_system_metrics,
+                'response_metadata': final_metrics,
+                'streaming': True
+            }
+        )
+        
+        return metrics
     
     def warmup_model(self, model_name: str) -> bool:
         """Warmup the model with a simple request"""

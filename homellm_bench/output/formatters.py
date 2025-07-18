@@ -69,7 +69,12 @@ class BenchmarkFormatter:
                 'avg_prompt_tokens',
                 'avg_completion_tokens', 
                 'avg_generation_time',
-                'avg_time_to_first_token'
+                'avg_time_to_first_token',
+                # TTS metrics
+                'tts_enabled',
+                'total_audio_files',
+                'avg_tts_rtf',
+                'total_tts_time'
             ]
             
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -83,8 +88,25 @@ class BenchmarkFormatter:
                     avg_completion_tokens = sum(m.completion_tokens for m in turn_metrics) / len(turn_metrics)
                     avg_generation_time = sum(m.total_generation_time for m in turn_metrics) / len(turn_metrics)
                     avg_ttft = sum(m.time_to_first_token for m in turn_metrics) / len(turn_metrics)
+                    
+                    # Calculate TTS metrics
+                    tts_turns = [m for m in turn_metrics if m.tts_metadata]
+                    if tts_turns:
+                        tts_enabled = True
+                        total_audio_files = sum(m.tts_metadata.get("audio_files_created", 0) for m in tts_turns)
+                        avg_tts_rtf = sum(m.tts_metadata.get("tts_rtf", 0) for m in tts_turns) / len(tts_turns)
+                        total_tts_time = sum(m.tts_metadata.get("tts_processing_time", 0) for m in tts_turns)
+                    else:
+                        tts_enabled = False
+                        total_audio_files = 0
+                        avg_tts_rtf = 0
+                        total_tts_time = 0
                 else:
                     avg_prompt_tokens = avg_completion_tokens = avg_generation_time = avg_ttft = 0
+                    tts_enabled = False
+                    total_audio_files = 0
+                    avg_tts_rtf = 0
+                    total_tts_time = 0
                 
                 # Extract engine info from first turn if available
                 engine_name = turn_metrics[0].engine_name if turn_metrics else "unknown"
@@ -103,7 +125,11 @@ class BenchmarkFormatter:
                     'avg_prompt_tokens': round(avg_prompt_tokens, 1),
                     'avg_completion_tokens': round(avg_completion_tokens, 1),
                     'avg_generation_time': round(avg_generation_time, 3),
-                    'avg_time_to_first_token': round(avg_ttft, 3)
+                    'avg_time_to_first_token': round(avg_ttft, 3),
+                    'tts_enabled': tts_enabled,
+                    'total_audio_files': total_audio_files,
+                    'avg_tts_rtf': round(avg_tts_rtf, 3),
+                    'total_tts_time': round(total_tts_time, 3)
                 })
     
     def _save_json(self, results: List["ConversationBenchmarkResult"], 
@@ -197,14 +223,48 @@ class BenchmarkFormatter:
             if results and results[0].turn_metrics:
                 f.write("## Sample Turn-by-Turn Metrics\n\n")
                 f.write(f"*From conversation: {results[0].conversation_name}*\n\n")
-                f.write("| Turn | Prompt Tokens | Completion Tokens | Speed (tok/s) | TTFT (ms) |\n")
-                f.write("|------|---------------|------------------|---------------|----------|\n")
+                f.write("| Turn | Prompt Tokens | Completion Tokens | Speed (tok/s) | TTFT (ms) | TTS Files | TTS RTF |\n")
+                f.write("|------|---------------|------------------|---------------|----------|-----------|----------|\n")
                 
                 for i, metric in enumerate(results[0].turn_metrics, 1):
                     ttft_ms = metric.time_to_first_token * 1000
+                    
+                    # Extract TTS metrics if available
+                    tts_files = "N/A"
+                    tts_rtf = "N/A"
+                    if metric.tts_metadata:
+                        tts_files = str(metric.tts_metadata.get("audio_files_created", "N/A"))
+                        tts_rtf_val = metric.tts_metadata.get("tts_rtf", 0)
+                        tts_rtf = f"{tts_rtf_val:.3f}" if tts_rtf_val else "N/A"
+                    
                     f.write(f"| {i} | {metric.prompt_tokens} | {metric.completion_tokens} | "
-                           f"{metric.tokens_per_second:.1f} | {ttft_ms:.0f} |\n")
+                           f"{metric.tokens_per_second:.1f} | {ttft_ms:.0f} | {tts_files} | {tts_rtf} |\n")
                 f.write("\n")
+                
+                # Add TTS Summary if any turns have TTS data
+                tts_turns = [m for m in results[0].turn_metrics if m.tts_metadata]
+                if tts_turns:
+                    f.write("## TTS Performance Summary\n\n")
+                    total_audio_files = sum(m.tts_metadata.get("audio_files_created", 0) for m in tts_turns)
+                    total_tts_time = sum(m.tts_metadata.get("tts_processing_time", 0) for m in tts_turns)
+                    avg_rtf = sum(m.tts_metadata.get("tts_rtf", 0) for m in tts_turns) / len(tts_turns)
+                    
+                    f.write(f"- **Total Audio Files Generated:** {total_audio_files}\n")
+                    f.write(f"- **Total TTS Processing Time:** {total_tts_time:.2f} seconds\n")
+                    f.write(f"- **Average TTS RTF:** {avg_rtf:.3f} (lower is better)\n")
+                    f.write(f"- **TTS-Enabled Turns:** {len(tts_turns)}/{len(results[0].turn_metrics)}\n\n")
+                    
+                    # TTS performance interpretation
+                    if avg_rtf < 0.5:
+                        performance = "Excellent (2x+ faster than real-time)"
+                    elif avg_rtf < 1.0:
+                        performance = "Good (faster than real-time)"
+                    elif avg_rtf < 2.0:
+                        performance = "Fair (slower than real-time)"
+                    else:
+                        performance = "Poor (much slower than real-time)"
+                    
+                    f.write(f"**TTS Performance:** {performance}\n\n")
     
     def _save_system_info(self, system_info: Dict[str, Any], path: Path):
         """Save detailed system information"""

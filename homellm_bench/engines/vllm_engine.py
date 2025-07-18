@@ -1,7 +1,7 @@
 import os
-from typing import Optional, Dict, Any, List
-
 import sys
+from typing import Optional, Dict, Any, List, Generator
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ..metrics.vllm_collector import VLLMMetricsCollector
@@ -53,6 +53,23 @@ class VLLMEngine:
             raise RuntimeError(f"vLLM server is not running on {self.host}:{self.port}")
         
         return self.metrics_collector.generate_chat_with_metrics(
+            model_name=self.model_name,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            **kwargs
+        )
+    
+    def generate_chat_streaming(self,
+                               messages: List[Dict[str, str]],
+                               max_tokens: int = 100,
+                               temperature: float = 0.7,
+                               **kwargs) -> Generator[str, None, GenerationMetrics]:
+        """Generate chat completion with streaming tokens and final metrics"""
+        if not self.is_running():
+            raise RuntimeError(f"vLLM server is not running on {self.host}:{self.port}")
+        
+        return self.metrics_collector.generate_chat_streaming(
             model_name=self.model_name,
             messages=messages,
             max_tokens=max_tokens,
